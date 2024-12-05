@@ -19,6 +19,10 @@ will not work as intended if you launch through HOOK LINE SINKER
 just give it a good click it should do somethin
 
 --- Instructions for Use In-Game ---
+
+
+backspace && = keys: will open the gui to upload or pick a different image *IMPORTANT*
+
 = key: spawn in an image where the cursor is (MAX OF ONE)
 
 = key: will play a gif if the image is a gif and is placed down
@@ -26,8 +30,6 @@ just give it a good click it should do somethin
 backspace && - keys:  will change gif playback mode.
 
 - key: get rid of all images spawned in.
-
-backspace && = keys: will open the gui to upload or pick a different image *IMPORTANT*
 
 shift && = keys: will put the image at the player
 
