@@ -24,6 +24,7 @@ just give it a good click it should do somethin
 = key: will play a gif if the image is a gif and is placed down
 
 backspace && - keys:  will change gif playback mode.
+
 - key: get rid of all images spawned in.
 
 backspace && = keys: will open the gui to upload or pick a different image *IMPORTANT*
