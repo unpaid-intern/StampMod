@@ -6,10 +6,11 @@ https://www.python.org/
 get it here rawr
 
 just like, download the zip, put er in ur mods folder, unextract...
-
 once its there and python is installed on ur machine: 
-
 initialize using "NyooooomLetsGo.py" 
+
+!! WARNING !! 
+will not work as intended if you launch through HOOK LINE SINKER
 
 just give it a good click it should do somethin
 
