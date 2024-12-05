@@ -6,6 +6,7 @@ https://www.python.org/
 get it here rawr
 
 just like, download the zip, put er in ur mods folder, unextract...
+https://github.com/unpaid-intern/_Stamp_Mod/blob/main/PurplePuppy.Stamps.zip
 once its there and python is installed on ur machine: 
 
 initialize using "NyooooomLetsGo.py" 
