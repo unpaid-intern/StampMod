@@ -1,5 +1,5 @@
 # _Stamp_Mod
-little hobby project for webfish
+little hobby project for webfish - IN BETA!!!!
 
 youll need python! 
 https://www.python.org/
