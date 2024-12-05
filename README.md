@@ -19,4 +19,8 @@ will not work as intended if you launch through HOOK LINE SINKER
 just give it a good click it should do somethin
 
 --- Instructions for Use In-Game ---
-
+= key: spawn in an image where the cursor is (MAX OF ONE)
+- key: get rid of all images spawned in.
+backspace && = keys: will open the gui to upload or pick a different image *IMPORTANT*
+shift && = keys: will put the image at the player
+ctrl && = keys: will put the image in the water if ur in the dock
