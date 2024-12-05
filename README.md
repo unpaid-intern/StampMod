@@ -7,6 +7,7 @@ get it here rawr
 
 just like, download the zip, put er in ur mods folder, unextract...
 once its there and python is installed on ur machine: 
+
 initialize using "NyooooomLetsGo.py" 
 
 !! WARNING !! 
