@@ -1,37 +1,29 @@
-# _Stamp_Mod
-little hobby project for webfish - IN BETA!!!!
+setup:
 
-youll need python!  
-https://www.python.org/
-get it here rawr
+extract and put in game mods folder
 
-just like, download the zip, put er in ur mods folder, unextract...
-
-https://github.com/unpaid-intern/_Stamp_Mod/blob/main/PurplePuppy.Stamps.zip
-
-once its there and python is installed on ur machine: 
-
-initialize using "NyooooomLetsGo.py" 
-
-!! WARNING !! 
-will not work as intended if you launch through HOOK LINE SINKER
-
-just give it a good click it should do somethin
+if using a mod loader do a manual import using the zip
 
 --- Instructions for Use In-Game ---
 
+ - key: will open my image processing gui. includes a save menu. once an image has finished processing it will be available for use in game. 
 
-backspace && = keys: will open the gui to upload or pick a different image *IMPORTANT*
+ = key: spawn in an image where the cursor is (MAX OF ONE if not on a game canvas) OR will play a gif if a gif is placed down
 
-= key: spawn in an image where the cursor is (MAX OF ONE)
+ shift and = keys: will spawn in an image where the player is OR will toggle gif mode if a gif is placed down
 
-= key: will play a gif if the image is a gif and is placed down
+ CTRL and = keys: will spawn in an image for viewing at the dock
 
-backspace && - keys:  will change gif playback mode.
+ Backspace Key: functions as CTRL Z for images placed down.
 
-- key: get rid of all images spawned in.
+--- general info ---
 
-shift && = keys: will put the image at the player
+be patient, my GUI might take a second to launch. but you can keep it open... !
 
-ctrl && = keys: will put the image in the water if ur in the dock
+images are automatically adjusted to be upright relative to the player camera.
 
+in game canvases can display one 200 * 200 image - I recommend keeping image size at 200 or below
+
+only one image can be placed off the in game canvases at a time.
+
+CURRENTLY IN BETA
