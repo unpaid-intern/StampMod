@@ -1,7 +1,7 @@
 # Stamps
 A stamp and art saving mod for for WEBFISHING using GDWeave
 
-<p align="center"><img src="https://i.imgur.com/lLyhXj8.png"/></p>
+<p align="center"><img src=""/></p>
 
 ## Keybinds
 > **Keybinds are fully customizable using my stamp menu**
