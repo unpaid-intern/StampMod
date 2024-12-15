@@ -30,14 +30,16 @@ from PySide6.QtCore import (
     Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot
 )
 
-
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
         # If the application is frozen, use the executable's directory
-        return Path(sys.executable).parent
+        base_path = Path(sys.executable).parent
     else:
         # If not frozen, use the script's directory
-        return Path(__file__).parent
+        base_path = Path(__file__).parent
+
+    # Trim just the current script directory
+    return base_path.parent
 
 def exe_path_fs(relative_path: str) -> Path:
     base_path = get_base_path()
@@ -1262,7 +1264,7 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
         if message_callback:
             message_callback(f"Processing applied: {process_mode}")
             
-        img = crop_to_solid_area(img)
+        
         # Save a preview of the processed image in 'preview' folder
         create_and_clear_preview_folder(message_callback)
 
@@ -1277,6 +1279,8 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
                     pixels[x, y] = (0, 0, 0, 0)  # Make fully transparent
 
         # Save the preview image
+        img = crop_to_solid_area(img)
+        
         preview_path = exe_path_fs('game_data/stamp_preview/preview.png')
         img.save(preview_path)
         if message_callback:

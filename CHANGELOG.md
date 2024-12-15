@@ -24,3 +24,4 @@ got ctrl z to function and changed keybinds
 - added linux version (maybe possibly it prob doesn't work)
 - changed location of saved stamps to %appdata%/local/webfishing_stamp_mod or whatever the fuck Linux ppl use (so now everything wont get deleted every update)
 - faster launching executable
+- fixed antivirus not allowing executable to be downloaded for the 3 mcaffee users
