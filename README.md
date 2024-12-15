@@ -24,10 +24,10 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 ## General Information
 
 - **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Scanner, SecureAge, VirIT, or Zillya antivirus (no it's **not a virus** lol)
-- The stamps menu might take a moment to launch
+- The stamps menu might take a moment to launch the first time
 - You can **paste images** into the menu directly or **select a file**
 - Images are automatically adjusted to be **upright relative to the player camera**
-- **In-game canvases** have a 200x200 resolution. I recommend keeping stamps below this size
+- In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
 - **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
 - saved stamps are located at %appdata%/local/webfishing_stamp_mod or whatever the fuck it's called on Linux
 - Be mindful of **performance and lag**, especially when playing GIFs. This is a **server side mod**, and people play on potatoes
@@ -35,7 +35,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 ## Installation (for the peeps)
 **Ensure to not accidentally download the zip from `Code`**
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
-2. Download [for Windows](https://github.com/BlueberryWolf/Flyfishing/releases/latest/download/BlueberryWolfi.Flyfishing.zip) or [for Linux](https://github.com/BlueberryWolf/Flyfishing/releases/latest/download/BlueberryWolfi.Flyfishing.zip)
+2. Download [for Windows](https://github.com/BlueberryWolf/Flyfishing/releases/latest/download/BlueberryWolfi.Flyfishing.zip) or [for Linux]()
 3. Extract to `PurplePuppy-Stamps` and be careful to **not rename it**.
 4. **Optionally** download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract the zip to `BlueberryWolfi.APIs`
 5. Place folder(s) in `WEBFISHING/GDWeave/Mods/`
