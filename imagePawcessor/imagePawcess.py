@@ -30,6 +30,34 @@ from PySide6.QtCore import (
     Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot
 )
 
+current_dir = os.getcwd()
+log_file_path = os.path.join(current_dir, 'error.log')
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(log_file_path, mode='w'),
+        logging.StreamHandler(sys.stdout),
+    ]
+)
+
+class LoggerWriter:
+    def __init__(self, level):
+        self.level = level
+
+    def write(self, message):
+        if message.strip():
+            self.level(message.strip())
+
+    def flush(self):
+        for handler in logging.root.handlers:
+            handler.flush()
+
+sys.stdout = LoggerWriter(logging.info)
+sys.stderr = LoggerWriter(logging.error)
+
+
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
         # If the application is frozen, use the executable's directory
@@ -5548,7 +5576,12 @@ def cleanup_saved_stamps():
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-
+    print("Starting script.")
+    try:
+        raise ValueError("This is a test exception.")
+    except Exception as e:
+        logging.exception("An exception occurred.")
+    print("Script continues.")
     # Set the Application User Model ID for Windows taskbar (prevents grouping issues)
     if sys.platform.startswith('win'):
         import ctypes
