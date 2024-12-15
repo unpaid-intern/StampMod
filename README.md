@@ -33,9 +33,9 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - Be mindful of **performance and lag**, especially when playing GIFs. This is a **server side mod**, and people play on potatoes
 
 ## Installation (for the peeps)
-**Ensure to not accidentally download the zip from `Code`**
+**Ensure to not accidentally download from `Code`**
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
-2. Download [for Windows](https://github.com/BlueberryWolf/Flyfishing/releases/latest/download/BlueberryWolfi.Flyfishing.zip) or [for Linux]()
+2. Download [for Windows]() or [for Linux]()
 3. Extract to `PurplePuppy-Stamps` and be careful to **not rename it**.
 4. **Optionally** download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract the zip to `BlueberryWolfi.APIs`
 5. Place folder(s) in `WEBFISHING/GDWeave/Mods/`
