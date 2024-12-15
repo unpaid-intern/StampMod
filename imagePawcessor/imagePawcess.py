@@ -31,7 +31,7 @@ from PySide6.QtCore import (
 )
 
 current_dir = os.getcwd()
-log_file_path = os.path.join(current_dir, 'error.log')
+log_file_path = os.path.join(current_dir, 'menu.log')
 
 logging.basicConfig(
     level=logging.DEBUG,
