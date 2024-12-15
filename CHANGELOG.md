@@ -14,14 +14,16 @@ got ctrl z to function and changed keybinds
 > we r getting out of beta with this one!
 - added art saving feature
 - added keybinds courtesy of blueberry wolf
-- you can now place more stamps off-canvas
 - made gifs more consistent
 - discovered that antivirus SUCKS fuck you mcaffee
 - improved preprocessing
 - added manual brightness adjustment
-- improved ctrl z logic
 - made stamp menu smaller for the people on crts
-- added linux version (maybe possibly it prob doesn't work)
 - changed location of saved stamps to %appdata%/local/webfishing_stamp_mod or whatever the fuck Linux ppl use (so now everything wont get deleted every update)
 - faster launching executable
-- fixed antivirus not allowing executable to be downloaded for the 3 mcaffee users
+- added executable manager
+> future updates:
+- linux version
+- improved preprocessing logic
+- improved ctrl z logic
+- more stamps off-canvas

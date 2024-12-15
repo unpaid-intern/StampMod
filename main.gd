@@ -33,6 +33,7 @@ var default_config_data = {
 	"ctrl_z": 16777220,
 	"toggle_playback": 45,
 	"gif_ready" : false,
+	"pid" : -1,
 	"walky_talky_webfish": "nothing new!",
 	"walky_talky_menu" : "nothing new!"
 }

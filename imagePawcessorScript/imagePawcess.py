@@ -30,6 +30,8 @@ from PySide6.QtCore import (
     Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot
 )
 
+
+"""
 current_dir = os.getcwd()
 log_file_path = os.path.join(current_dir, 'menu.log')
 
@@ -56,7 +58,7 @@ class LoggerWriter:
 
 sys.stdout = LoggerWriter(logging.info)
 sys.stderr = LoggerWriter(logging.error)
-
+"""
 
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
@@ -5573,9 +5575,58 @@ def cleanup_saved_stamps():
     print("\nRemoved Folders:")
     print(removed_folders if removed_folders else "No folders removed.")
 
+def update_pid_in_config():
+    """
+    Update the 'pid' key in the JSON file with the current process's PID.
+    If the JSON file does not exist, create it with default values.
+    """
+    config_path = get_config_path()
+
+    # Check if the config file exists, create it if it doesn't
+    if not config_path.exists():
+        print("Config file not found. Creating default configuration...")
+        create_default_config(config_path)
+
+    # Load the current JSON data
+    with open(config_path, 'r') as file:
+        config_data = json.load(file)
+
+    # Update the 'pid' key
+    config_data['pid'] = os.getpid()
+
+    # Save the updated JSON back to the file
+    with open(config_path, 'w') as file:
+        json.dump(config_data, file, indent=4)
+
+    print(f"Updated 'pid' to {os.getpid()} in {config_path}")
+
+
+def create_default_config(config_path: Path):
+    """
+    Create a default JSON configuration file at the given path.
+    """
+    default_config_data = {
+        "open_menu": 16777252,
+        "spawn_stamp": 61,
+        "ctrl_z": 16777220,
+        "toggle_playback": 45,
+        "gif_ready": False,
+        "pid": -1,
+        "walky_talky_webfish": "nothing new!",
+        "walky_talky_menu": "nothing new!"
+    }
+
+    # Write the default configuration to the file
+    with open(config_path, 'w') as file:
+        json.dump(default_config_data, file, indent=4)
+
+    print(f"Default configuration file created at {config_path}")
+
 
 if __name__ == '__main__':
+    update_pid_in_config()
     app = QApplication(sys.argv)
+    """
     print("Starting script.")
     try:
         raise ValueError("This is a test exception.")
@@ -5583,10 +5634,14 @@ if __name__ == '__main__':
         logging.exception("An exception occurred.")
     print("Script continues.")
     # Set the Application User Model ID for Windows taskbar (prevents grouping issues)
+    """
     if sys.platform.startswith('win'):
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u"ImageProcessingGUI")
 
+    pid_file = exe_path_fs('imagePawcess.pid')
+    with open(pid_file, 'w') as f:
+        f.write(str(os.getpid()))
     # Define the icon path and apply the icon
     icon_path = exe_path_stylesheet("exe_data/icon.png")
 
