@@ -306,8 +306,14 @@ func check_updates():
 			
 			var json_result = JSON.parse(data)
 			if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
-				config_data = json_result.result
+				var config_data = json_result.result
 
+				# Check if the config is malformed or has less than 8 keys
+				if config_data.size() < 8:
+					print(prefix + "Config is malformed or too short. Resetting to default.")
+					reset_config()
+					continue  # Skip the rest of the loop to avoid using the malformed config
+				
 				# Handle "walky_talky_webfish" for canvas data
 				if config_data.has("walky_talky_webfish") and str(config_data["walky_talky_webfish"]) != "nothing new!":
 					var webfish_value = str(config_data["walky_talky_webfish"])
@@ -321,20 +327,20 @@ func check_updates():
 						var updated_json = JSON.print(config_data, "\t")
 						file.store_string(updated_json)
 						file.close()
-						print(prefix, "Config file updated successfully.")
+						print(prefix + "Config file updated successfully.")
 					else:
-						print(prefix, "Failed to write updated config.")
+						print(prefix + "Failed to write updated config.")
 			else:
-				print(prefix, "Failed to parse config file.")
-				load_or_create_config()
+				print(prefix + "Failed to parse config file. Resetting to default.")
+				reset_config()
 		else:
-			print(prefix, "Failed to open config file.")
-			load_or_create_config()
+			print(prefix + "Failed to open config file. Resetting to default.")
+			reset_config()
 			
 		# Check player presence and handle spawning
 		var current_scene = get_tree().current_scene
 		if current_scene == null:
-			print(prefix, "No current scene found.")
+			print(prefix + "No current scene found.")
 			continue
 
 		var _Player = current_scene.get_node_or_null("Viewport/main/entities/player")
@@ -343,13 +349,15 @@ func check_updates():
 			if was_player_present:
 				if _Spawn:
 					_Spawn.queue_free()
-				_Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new()
+				_Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").instance()  # .instance() for Godot 3.x.x
 				add_child(_Spawn)
-				print(prefix, "Player was removed. Respawned _Spawn node.")
+				print(prefix + "Player was removed. Respawned _Spawn node.")
 			was_player_present = false
 		else:
 			was_player_present = true
 			in_game = true
+
+
 
 # Handle walky_talky_webfish
 func handle_walky_talky_webfish(value):
