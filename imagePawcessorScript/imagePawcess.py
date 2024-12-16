@@ -6708,9 +6708,6 @@ if __name__ == '__main__':
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u"ImageProcessingGUI")
 
-    pid_file = exe_path_fs('imagePawcess.pid')
-    with open(pid_file, 'w') as f:
-        f.write(str(os.getpid()))
     # Define the icon path and apply the icon
     icon_path = exe_path_stylesheet("imagePawcessor/exe_data/icon.png")
 
