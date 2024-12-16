@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+import webbrowser
 import cv2 
 # Image processing libraries
 from PIL import Image, ImageSequence, ImageGrab, ImageQt, ImageFilter, UnidentifiedImageError
@@ -2432,7 +2433,7 @@ class MainWindow(QMainWindow):
 
         self.background_label.setScaledContents(False)  # Prevent automatic scaling
         background_layout.addWidget(self.background_label, alignment=Qt.AlignCenter)
-        spacer = QSpacerItem(0, 20, QSizePolicy.Minimum, QSizePolicy.Expanding)
+        spacer = QSpacerItem(0, 10, QSizePolicy.Minimum, QSizePolicy.Expanding)
         background_layout.addItem(spacer)
 
         # Optionally, connect the clicked signal
@@ -2502,13 +2503,23 @@ class MainWindow(QMainWindow):
         self.save_button.clicked.connect(self.show_save_menu)
         bottom_button_layout.addWidget(self.save_button)
 
-        self.exit_button = QPushButton("Mod Options / Info")
+
+        self.clip_button = QPushButton("Clipboard")
+        self.clip_button.setStyleSheet(button_stylesheet)
+        self.clip_button.setMinimumSize(160, 60)
+        #self.clip_button.clicked.connect(self.request_and_monitor_canvas)
+        bottom_button_layout.addWidget(self.clip_button)
+        self.clip_button.clicked.connect(lambda: self.open_image_from_clipboard())
+
+
+        self.exit_button = QPushButton("Mod Info")
         self.exit_button.setStyleSheet(button_stylesheet)
-        self.exit_button.setMinimumSize(240, 60)
+        self.exit_button.setMinimumSize(160, 60)
         #self.exit_button.clicked.connect(self.request_and_monitor_canvas)
         bottom_button_layout.addWidget(self.exit_button)
-
+        self.exit_button.clicked.connect(self.open_website)
         button_layout.addLayout(bottom_button_layout)
+        
 
         # Add the button_container to the background_layout
         background_layout.addWidget(button_container, alignment=Qt.AlignCenter)
@@ -2523,7 +2534,8 @@ class MainWindow(QMainWindow):
         # -------------------------
         self.stacked_widget.addWidget(initial_widget)
 
-
+    def open_website(self):
+        webbrowser.open("https://github.com/unpaid-intern/StampMod/")
 
     def request_and_monitor_canvas(self):
         """
