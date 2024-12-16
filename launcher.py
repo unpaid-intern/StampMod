@@ -5,6 +5,14 @@ import subprocess
 import platform
 import psutil
 from pathlib import Path
+import logging
+
+# Setup logging
+logging.basicConfig(
+    filename='launcher.log',
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # Only import Windows-specific libraries if on Windows
 if platform.system() == 'Windows':
@@ -57,23 +65,29 @@ def get_config_path() -> Path:
     return config_file
 
 
-
 def load_config() -> dict:
     config_path = get_config_path()
     if not config_path.exists():
         with open(config_path, 'w') as file:
             json.dump({"pid": -1}, file, indent=4)
-        print(f"Created default config at {config_path}")
+        logging.info(f"Created default config at {config_path}")
         return {"pid": -1}
     with open(config_path, 'r') as file:
-        return json.load(file)
+        config = json.load(file)
+        logging.debug(f"Loaded config: {config}")
+        return config
+
 
 def is_process_running_by_pid(pid: int) -> bool:
     try:
         proc = psutil.Process(pid)
-        return proc.is_running()
-    except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
+        running = proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
+        logging.debug(f"Process with PID {pid} is_running: {running}")
+        return running
+    except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied) as e:
+        logging.warning(f"Process with PID {pid} check failed: {e}")
         return False
+
 
 def bring_to_front_windows(pid):
     try:
@@ -84,13 +98,17 @@ def bring_to_front_windows(pid):
                 win32gui.SetForegroundWindow(hwnd)
                 return False  # Stop enumeration
             return True  # Continue enumeration
+
         win32gui.EnumWindows(callback, pid)
+        logging.info(f"Brought process with PID {pid} to front.")
     except Exception as e:
-        print(f"Failed to bring window to front: {e}")
+        logging.error(f"Failed to bring window to front: {e}")
+
 
 def bring_to_front(pid):
     if platform.system() == 'Windows':
         bring_to_front_windows(pid)
+
 
 def launch_process(launch_cmd):
     """
@@ -98,17 +116,13 @@ def launch_process(launch_cmd):
     """
     try:
         if platform.system() == 'Windows':
-
-
             proc = subprocess.Popen(
                 launch_cmd,
                 creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-
         else:
-            # For Linux/MacOS, use os.setsid to detach and redirect output
             proc = subprocess.Popen(
                 launch_cmd,
                 start_new_session=True,
@@ -118,13 +132,24 @@ def launch_process(launch_cmd):
                 close_fds=True
             )
 
+        logging.info(f"Process launched successfully with PID {proc.pid}")
+
+        # Update config with new PID
+        config_path = get_config_path()
+        with open(config_path, 'w') as file:
+            json.dump({"pid": proc.pid}, file, indent=4)
+        logging.debug(f"Updated config with PID {proc.pid}")
+
         print(f"Process launched successfully with PID {proc.pid}")
         return proc.pid
     except Exception as e:
+        logging.error(f"Failed to launch process: {e}")
         print(f"Failed to launch process: {e}")
-    sys.exit(1)
+        sys.exit(1)
+
 
 def main():
+    logging.debug("Starting main function")
     # Load the existing config
     config = load_config()
     stored_pid = config.get("pid", -1)
@@ -132,42 +157,52 @@ def main():
     # Check if the stored PID is valid and running
     if stored_pid != -1 and is_process_running_by_pid(stored_pid):
         print(f"Process already running with PID {stored_pid}. Bringing it to the front.")
+        logging.info(f"Process already running with PID {stored_pid}. Bringing it to the front.")
         bring_to_front(stored_pid)
         return
 
     print("No valid process found. Launching a new process...")
+    logging.info("No valid process found. Launching a new process...")
 
-    # Correctly resolve script/executable paths
-    if getattr(sys, 'frozen', False):
-        # If frozen, use the _MEIPASS attribute to find bundled resources
-        base_path = Path(sys.executable).parent
-    else:
-        base_path = Path(__file__).parent
-    
-    base_path = base_path.parent
+    # Resolve base path
+    try:
+        if getattr(sys, 'frozen', False):
+            base_path = Path(sys.executable).parent
+            logging.debug(f"Running as a frozen executable. Base path: {base_path}")
+        else:
+            base_path = Path(__file__).parent
+            logging.debug(f"Running as a script. Base path: {base_path}")
 
-    image_pawcess_exe = base_path / 'imagePawcessor' / 'imagePawcess.exe'
-    image_pawcess_script = base_path / 'imagePawcessorScript' / 'imagePawcess.py'
-        
-    if image_pawcess_exe.exists():
-        print(f"Executable found: {image_pawcess_exe}")
-        launch_cmd = [str(image_pawcess_exe)]
-    elif image_pawcess_script.exists():
-        print(f"Script found: {image_pawcess_script}")
-        launch_cmd = [sys.executable, str(image_pawcess_script)]
-    else:
-        print("Neither executable nor script found. Check the paths!")
+        # Since the user mentioned the executables/scripts are in the same directory,
+        # we do not navigate to the parent directory
+        # base_path = base_path.parent
+
+        image_pawcess_exe = base_path / 'imagePawcess.exe'
+        image_pawcess_script = base_path / 'imagePawcess.py'
+
+        logging.debug(f"Looking for executable at: {image_pawcess_exe}")
+        logging.debug(f"Looking for script at: {image_pawcess_script}")
+
+        if image_pawcess_exe.exists():
+            print(f"Executable found: {image_pawcess_exe}")
+            logging.info(f"Executable found: {image_pawcess_exe}")
+            launch_cmd = [str(image_pawcess_exe)]
+        elif image_pawcess_script.exists():
+            print(f"Script found: {image_pawcess_script}")
+            logging.info(f"Script found: {image_pawcess_script}")
+            launch_cmd = [sys.executable, str(image_pawcess_script)]
+        else:
+            print("Neither executable nor script found. Check the paths!")
+            logging.error("Neither executable nor script found. Check the paths!")
+            sys.exit(1)
+
+        # Launch the process
+        launch_process(launch_cmd)
+    except Exception as e:
+        logging.error(f"Error in main: {e}")
+        print(f"Error in main: {e}")
         sys.exit(1)
 
-    #works fine but cant find anything when exe "Neither executable nor script found. Check the paths!")
-    # Launch executable or script
-    if image_pawcess_exe.exists():
-        launch_cmd = [str(image_pawcess_exe)]
-    else:
-        launch_cmd = [sys.executable, str(image_pawcess_script)]
-
-    # Launch the process
-    launch_process(launch_cmd)
 
 if __name__ == "__main__":
     main()

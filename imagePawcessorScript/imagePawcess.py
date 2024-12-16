@@ -2033,7 +2033,7 @@ class CanvasWorker(QObject):
         """
         Processes exported canvas data JSON and generates PNG images.
         """
-        output_directory = Path("game_data/game_canvises").resolve()
+        output_directory = exe_path_fs("game_data/game_canvises")
         output_directory.mkdir(parents=True, exist_ok=True)
 
         try:
