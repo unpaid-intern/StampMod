@@ -5,18 +5,17 @@ import subprocess
 import platform
 import psutil
 from pathlib import Path
-import time
 
 # Only import Windows-specific libraries if on Windows
 if platform.system() == 'Windows':
     try:
-        import ctypes
         import win32gui
         import win32con
         import win32process
     except ImportError:
         print("The 'pywin32' library is required on Windows. Install it using 'pip install pywin32'.")
         sys.exit(1)
+
 
 def get_config_path() -> Path:
     """
@@ -25,13 +24,18 @@ def get_config_path() -> Path:
     Returns:
         Path: The full path to the configuration file.
     """
-    # Start with the base path of the executable or script
-    if getattr(sys, 'frozen', False):
-        # If the application is frozen, use the executable's directory
-        base_path = Path(sys.executable).parent
-    else:
-        # If not frozen, use the script's directory
-        base_path = Path(__file__).parent
+    def get_base_path() -> Path:
+        if getattr(sys, 'frozen', False):
+            # If the application is frozen, use the executable's directory
+            base_path = Path(sys.executable).parent
+        else:
+            # If not frozen, use the script's directory
+            base_path = Path(__file__).parent
+
+        # Trim just the current script directory
+        return base_path.parent
+    
+    base_path = get_base_path()
 
     # Navigate up until we reach 'GDWeave'
     while base_path.name in ["mods", "PurplePuppy-Stamps"]:
@@ -52,134 +56,117 @@ def get_config_path() -> Path:
 
     return config_file
 
+
+
 def load_config() -> dict:
-    """
-    Load the configuration from the JSON file, creating a default if necessary.
-    """
     config_path = get_config_path()
-
-    # Default configuration data
-    default_config_data = {
-        "open_menu": 16777252,
-        "spawn_stamp": 61,
-        "ctrl_z": 16777220,
-        "toggle_playback": 45,
-        "gif_ready": False,
-        "pid": -1,
-        "walky_talky_webfish": "nothing new!",
-        "walky_talky_menu": "nothing new!"
-    }
-
-    # Create the file with default data if it does not exist
     if not config_path.exists():
         with open(config_path, 'w') as file:
-            json.dump(default_config_data, file, indent=4)
+            json.dump({"pid": -1}, file, indent=4)
         print(f"Created default config at {config_path}")
-        return default_config_data
-
-    # Load existing configuration
+        return {"pid": -1}
     with open(config_path, 'r') as file:
         return json.load(file)
 
-def save_pid_to_config(pid: int):
-    """
-    Save the current process PID to the configuration file.
-    """
-    config_path = get_config_path()
-    config = load_config()
-    config['pid'] = pid
-
-    with open(config_path, 'w') as file:
-        json.dump(config, file, indent=4)
-
-    print(f"Updated 'pid' to {pid} in config file.")
-
 def is_process_running_by_pid(pid: int) -> bool:
-    """
-    Check if a process with the given PID is running.
-    """
     try:
         proc = psutil.Process(pid)
         return proc.is_running()
-    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+    except (psutil.NoSuchProcess, psutil.ZombieProcess, psutil.AccessDenied):
         return False
 
-def bring_to_front_windows(proc):
-    """
-    Bring the window of the given process to the front on Windows.
-    """
+def bring_to_front_windows(pid):
     try:
-        def enum_windows_callback(hwnd, pid):
-            try:
-                _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
-                if found_pid == pid:
-                    if win32gui.IsWindowVisible(hwnd):
-                        win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
-                        win32gui.SetForegroundWindow(hwnd)
-                        return False  # Stop enumeration
-            except:
-                pass
+        def callback(hwnd, pid_to_match):
+            _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
+            if found_pid == pid_to_match and win32gui.IsWindowVisible(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                win32gui.SetForegroundWindow(hwnd)
+                return False  # Stop enumeration
             return True  # Continue enumeration
-
-        win32gui.EnumWindows(enum_windows_callback, proc.pid)
+        win32gui.EnumWindows(callback, pid)
     except Exception as e:
         print(f"Failed to bring window to front: {e}")
 
 def bring_to_front(pid):
-    """
-    Bring the application's window to the front based on the OS.
-    """
-    current_os = platform.system()
-    if current_os == 'Windows':
-        try:
-            proc = psutil.Process(pid)
-            bring_to_front_windows(proc)
-        except psutil.NoSuchProcess:
-            print("Process no longer exists.")
-    else:
-        print("Bringing window to front is not implemented for this OS.")
+    if platform.system() == 'Windows':
+        bring_to_front_windows(pid)
 
 def launch_process(launch_cmd):
     """
-    Launch the target process.
+    Launch the target process and fully detach it so the parent launcher can exit safely.
     """
     try:
-        proc = subprocess.Popen(launch_cmd)
-        print("Process launched successfully.")
+        if platform.system() == 'Windows':
+
+
+            with open("launch_log.txt", "w") as log_file:
+                proc = subprocess.Popen(
+                    launch_cmd,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                    stdout=log_file,
+                    stderr=log_file
+                )
+                
+        else:
+            # For Linux/MacOS, use os.setsid to detach and redirect output
+            proc = subprocess.Popen(
+                launch_cmd,
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True
+            )
+
+        print(f"Process launched successfully with PID {proc.pid}")
         return proc.pid
     except Exception as e:
         print(f"Failed to launch process: {e}")
-        sys.exit(1)
+    sys.exit(1)
 
 def main():
-    # Load configuration
+    # Load the existing config
     config = load_config()
     stored_pid = config.get("pid", -1)
 
-    # Verify if the stored PID is running
+    # Check if the stored PID is valid and running
     if stored_pid != -1 and is_process_running_by_pid(stored_pid):
-        print(f"Process already running with PID {stored_pid}. Bringing to front.")
+        print(f"Process already running with PID {stored_pid}. Bringing it to the front.")
         bring_to_front(stored_pid)
         return
 
-    # Determine the script directory
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    print("No valid process found. Launching a new process...")
 
-    # Define paths
-    image_pawcessor_dir = os.path.join(script_dir, 'imagePawcessor')
-    image_pawcess_exe = os.path.join(image_pawcessor_dir, 'imagePawcess.exe')
-    image_pawcess_script = os.path.join(script_dir, 'imagePawcessorScript', 'imagePawcess.py')
-
-    # Determine what to launch
-    if os.path.exists(image_pawcess_exe):
-        launch_cmd = [image_pawcess_exe]
+    # Correctly resolve script/executable paths
+    if getattr(sys, 'frozen', False):
+        # If frozen, use the _MEIPASS attribute to find bundled resources
+        base_path = Path(sys._MEIPASS)
     else:
-        launch_cmd = [sys.executable, image_pawcess_script]
+        base_path = Path(__file__).parent
 
-    # Launch the process and update PID in config
-    print("Launching process...")
-    new_pid = launch_process(launch_cmd)
-    save_pid_to_config(new_pid)
+    image_pawcess_exe = base_path / 'imagePawcessor' / 'imagePawcess.exe'
+    image_pawcess_script = base_path / 'imagePawcessorScript' / 'imagePawcess.py'
+        
+    if image_pawcess_exe.exists():
+        print(f"Executable found: {image_pawcess_exe}")
+        launch_cmd = [str(image_pawcess_exe)]
+    elif image_pawcess_script.exists():
+        print(f"Script found: {image_pawcess_script}")
+        launch_cmd = [sys.executable, str(image_pawcess_script)]
+    else:
+        print("Neither executable nor script found. Check the paths!")
+        sys.exit(1)
 
-if __name__ == '__main__':
+
+    # Launch executable or script
+    if image_pawcess_exe.exists():
+        launch_cmd = [str(image_pawcess_exe)]
+    else:
+        launch_cmd = [sys.executable, str(image_pawcess_script)]
+
+    # Launch the process
+    launch_process(launch_cmd)
+
+if __name__ == "__main__":
     main()
