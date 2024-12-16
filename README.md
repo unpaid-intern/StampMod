@@ -45,11 +45,11 @@ Here’s a quick guide to the different image processing methods and when to use
 
 - **K-Means Mapping**: Groups similar colors into clusters. Perfect for reducing noise and simplifying complex images. Adjust the clusters to control how stylized the result looks.
 
-- **Hybrid Dither**: Dynamically switches between Atkinson and Floyd-Steinberg dithering based on texture. Use this for images with a mix of smooth and detailed areas—it adapts smartly.
+- **Hybrid Dither**: Dynamically switches between Atkinson and Floyd-Steinberg dithering based on texture. Use this for images with a mix of smooth and detailed areas.
 
-- **Pattern Dither**: Uses a repeating 8x8 Bayer matrix for a retro, pixel-art effect. Best for artistic or nostalgic vibes.
+- **Pattern Dither**: Uses a repeating 8x8 Bayer matrix for a retro, pixel-art effect. Best for artsy look or... nostalgia?
 
-- **Atkinson Dither**: Lightweight dithering that’s great for small images. It was famously used on early Mac computers for monochrome displays.
+- **Atkinson Dither**: Lightweight dithering. Great for small images! It was used on early Mac computers for monochrome displays.
 
 - **Stucki Dither**: Smooths gradients with wide error diffusion. Ideal for larger images where you want less noise and softer transitions.
 
@@ -57,7 +57,7 @@ Here’s a quick guide to the different image processing methods and when to use
 
 - **Jarvis Dither**: Similar to Stucki but diffuses errors over an even larger area. Great for very detailed or gradient-heavy images.
 
-- **Sierra Dither**: A faster, simplified alternative to Jarvis. Good for medium images if you want decent quality without long processing times.
+- **Sierra Dither**: A faster, simplified alternative to Jarvis. Good for medium images.
 
 - **Random Dither**: Introduces noise for a chaotic, natural texture. Great for breaking up banding or adding a hand-drawn feel.
 
@@ -73,10 +73,8 @@ Choose what chalk colors to use by **enabling** or **disabling** them.
 - Use **Blank** to make certain colors fully transparent.
 
 #### **Boost and Threshold Adjustments**
-- **Boost:** Enhances the intensity of specific chalk colors, making muted tones stand out more. Higher values = brighter colors.  
+- **Boost:** Enhances the intensity of specific chalk colors in an image, making muted tones stand out more. Higher values = brighter colors.  
 - **Threshold:** Adjusts how closely a pixel's color must match a chalk color to be boosted. Lower values are more precise, while higher values affect broader ranges.
-
-Fine-tune these settings to control how your image interacts with the chalk palette.
 
 ---
 
@@ -103,7 +101,7 @@ If you wish to know the location of a specific canvas, please refer to the below
 ## Installation (for the peeps)
 **Ensure to not accidentally download from `Code`**
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
-2. Download [for Windows]()
+2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip)
 3. Extract to `PurplePuppy-Stamps` and be careful to **not rename it**.
 4. **Optionally** download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract the zip to `BlueberryWolfi.APIs`
 5. Place folder(s) in `WEBFISHING/GDWeave/Mods/`
