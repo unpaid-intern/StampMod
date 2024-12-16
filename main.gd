@@ -180,14 +180,14 @@ func _get_frames_location()->String:
 
 func _get_gui_location() -> String:
 	var gdweave_dir = _get_gdweave_dir()
-	var executable_name = "imagePawcess"
+	var executable_name = "launcher"
 	
 	# Add platform-specific file extension if needed
 	if OS.get_name() == "Windows":
 		executable_name += ".exe"
 	
 	# Construct the full path
-	var config_path = gdweave_dir.plus_file("mods").plus_file("PurplePuppy-Stamps").plus_file(executable_name)
+	var config_path = gdweave_dir.plus_file("mods").plus_file("PurplePuppy-Stamps").plus_file("imagePawcessor").plus_file(executable_name)
 	return config_path
 
 	

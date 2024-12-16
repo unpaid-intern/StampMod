@@ -131,10 +131,9 @@ def get_config_path() -> Path:
 processing_method_registry = {}
 use_lab = False
 first = False
-auto_color_boost = True
+brightness = 0.5
 
-
-exe_directory = exe_path_fs('exe_data')
+exe_directory = exe_path_fs('imagePawcessor/exe_data')
 
 
 if not exe_directory.exists():
@@ -188,7 +187,7 @@ def remove_background(input_image, message_callback=None, model_path=None, thres
 
     try:
         # Load model path
-        model_path = exe_path_fs("exe_data/remove_bg.onnx")
+        model_path = exe_path_fs("imagePawcessor/exe_data/remove_bg.onnx")
         message_callback(f"Using ONNX model at: {model_path}")
 
         if not isinstance(input_image, Image.Image):
@@ -276,45 +275,6 @@ def remove_background(input_image, message_callback=None, model_path=None, thres
         message_callback(f"An error occurred: {e}")
         return input_image
     
-def compute_brightness_adjustment(lab_image, use_lab, default_adjustment=0.5):
-    """
-    Helper function to compute a suitable brightness adjustment factor based on the input LAB image
-    and whether LAB color space is being used for color boosting.
-
-    Parameters:
-    - lab_image (np.ndarray): Input image in LAB color space with shape (H, W, 3).
-    - use_lab (bool): Flag indicating if LAB color space is used for color boosting.
-    - default_adjustment (float): Default brightness adjustment value to use if computation fails.
-
-    Returns:
-    - float: Brightness adjustment factor between 0 and 1.
-    """
-    try:
-        # Extract the L channel
-        L = lab_image[:, :, 0].astype(np.float32)
-        
-        # Compute the mean brightness
-        mean_brightness = np.mean(L)
-        
-        # Normalize mean brightness to range [0, 1]
-        normalized_brightness = mean_brightness / 255.0
-        
-        # Map normalized brightness to brightness adjustment factor
-        # Assuming that mean_brightness around 128 corresponds to no adjustment (0.5)
-        brightness_adjustment = normalized_brightness / 2.0
-        
-        # Adjust mapping based on use_lab flag
-        if use_lab:
-            # In LAB mode, prioritize balanced brightness
-            brightness_adjustment = 0.5  # No adjustment by default
-        else:
-            # In RGB mode, allow dynamic adjustment based on brightness
-            brightness_adjustment = np.clip(brightness_adjustment, 0.0, 1.0)
-        print(brightness_adjustment)
-        return brightness_adjustment
-    except Exception as e:
-        print(f"Error computing brightness adjustment: {e}")
-        return default_adjustment
 
 def adjust_boost_threshold(ckey, use_lab, lab_image, hsv_image, config):
     """
@@ -335,6 +295,8 @@ def adjust_boost_threshold(ckey, use_lab, lab_image, hsv_image, config):
     color_rgb = tuple(int(hex_code[i:i + 2], 16) for i in (0, 2, 4))
     boost = ckey.get('boost', 1.2)
     threshold = ckey.get('threshold', config['threshold_default'])
+
+    global brightness
 
     if use_lab:
         # Convert color to LAB
@@ -384,180 +346,174 @@ def adjust_boost_threshold(ckey, use_lab, lab_image, hsv_image, config):
     # Apply boost to saturation where mask is True
     return boost, threshold, color_mask
 
-def preprocess_image(image, color_key_array, callback=print, brightness_adjustment=None):
-    """"
-    Preprocesses the input image based on color keys and various parameters.
 
-    Parameters:
-    - image (np.ndarray): Input image in RGB or RGBA format.
-    - color_key_array (list of dict): List containing color keys with 'number', 'hex', 'boost', and 'threshold'.
-    - brightness_adjustment (float, optional): Value between 0 and 1 where 0.5 means no brightness adjustment.
-                                               If None or invalid, computed using the helper function.
-    - callback (function): Function to call for logging/debugging.
-
-    Returns:
-    - np.ndarray: Preprocessed image in RGB or RGBA format.
+def preprocess_image(image, color_key_array, callback=None):
     """
-    global use_lab
-    auto_color_boost = False
+    Preprocesses the image to enhance gradients, expand the color range,
+    and improve overall image quality for better processing results.
 
-    # Validate and compute brightness_adjustment
-    if brightness_adjustment is None or not (0.0 <= brightness_adjustment <= 1.0):
-        # Convert to LAB for brightness analysis
-        if image.shape[2] == 4:
-            rgb_image_for_brightness = image[:, :, :3].astype(np.uint8)
-        else:
-            rgb_image_for_brightness = image.astype(np.uint8)
-        lab_for_brightness = cv2.cvtColor(rgb_image_for_brightness, cv2.COLOR_RGB2LAB)
-        brightness_adjustment = compute_brightness_adjustment(lab_for_brightness, use_lab)
-        callback(f"Computed brightness_adjustment: {brightness_adjustment}")
-    else:
-        callback(f"Using provided brightness_adjustment: {brightness_adjustment}")
-
-    # Configuration based on use_lab
-    config = {
-        'gamma_correction': 0.8 if use_lab else 0.9,
-        'clahe_clip_limit': 4.0 if use_lab else 4.0,
-        'threshold_default': 20 if use_lab else 28,
-        'clahe_grid_size': 8, 
-        'unsharp_strength': 3,
-        'unsharp_radius': 1.0,
-        'contrast_percentiles': (1, 99),
-        'alpha_threshold': 191, 
+    Adjusts brightness based on the color key's brightest and darkest colors.
+    
+    Parameters:
+    - image: Input image as a NumPy array (H, W, C).
+    - color_key_array: List of dictionaries with color information to boost.
+    - params: Dictionary of parameters to control preprocessing steps.
+    """
+    # === Default Parameters ===
+    default_params = {
+        'alpha_threshold': 191,      # Process pixels with alpha > 191 (75% opacity)
+        'clahe_clip_limit': 4.0,     # Increase contrast enhancement
+        'clahe_grid_size': 8,        # Grid size suitable for 200x200 images
+        'saturation_boost': 1.5,     # Stronger boost for target colors
+        'unsharp_strength': 1.5,     # Enhance edges more aggressively
+        'unsharp_radius': 1.0,       # Radius for unsharp masking
+        'gamma_correction': 0.9,     # Slightly brighten the image
+        'contrast_percentiles': (1, 99),  # Aggressive contrast stretching
     }
 
+    # Merge default parameters with user-provided parameters
+    params = default_params
+    global brightness
+    # ==============================
+
+    # === Calculate Brightness Range from Color Key ===
     def calculate_luminance(rgb):
+        """Calculate luminance of an RGB color using standard weights."""
         return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
 
-    # Handle Alpha Channel
-    has_alpha = (image.shape[2] == 4)
-    if has_alpha:
-        alpha_channel = image[:, :, 3]
-        rgb_image = image[:, :, :3].astype(np.uint8)
-        opaque_mask = alpha_channel >= config['alpha_threshold']
-    else:
-        alpha_channel = None
-        rgb_image = image.astype(np.uint8)
-        opaque_mask = None  # Not used if there's no alpha channel
-
-    # Mild Noise Reduction
-    rgb_image = cv2.bilateralFilter(rgb_image, d=5, sigmaColor=30, sigmaSpace=30)
-
-    # Convert to LAB for centralized brightness adjustment
-    lab_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2LAB)
-    L, A, B = cv2.split(lab_image)
-
-    # Apply CLAHE to L Channel
-    clahe = cv2.createCLAHE(clipLimit=config['clahe_clip_limit'],
-                            tileGridSize=(config['clahe_grid_size'], config['clahe_grid_size']))
-    L = clahe.apply(L)
-    callback(f"Applied CLAHE with clipLimit: {config['clahe_clip_limit']} and tileGridSize: {config['clahe_grid_size']}")
-
-    # Adjust Brightness
-    # 0.5 means no change, <0.5 darkens, >0.5 brightens
-    brightness_factor = brightness_adjustment * 2  # Scale to [0, 2], where 1 is no change
-    L = np.clip(L * brightness_factor, 0, 255).astype(np.uint8)
-    callback(f"Applied brightness adjustment with factor: {brightness_factor}")
-
-    # Merge and Convert Back to RGB
-    lab_image = cv2.merge((L, A, B))
-    rgb_image = cv2.cvtColor(lab_image, cv2.COLOR_LAB2RGB)
-
-
     color_key_luminances = [
-        calculate_luminance(tuple(int(ck['hex'][i:i + 2], 16) for i in (0, 2, 4)))
-        for ck in color_key_array
+        calculate_luminance(tuple(int(color_key['hex'][i:i + 2], 16) for i in (0, 2, 4)))
+        for color_key in color_key_array
     ]
     min_brightness = min(color_key_luminances)
     max_brightness = max(color_key_luminances)
-    callback(f"Contrast Stretching: min_brightness={min_brightness}, max_brightness={max_brightness}")
+    # ==============================
 
-    # Determine opaque pixels
+    # Check if the image has an alpha channel
+    has_alpha = image.shape[2] == 4
     if has_alpha:
-        current_opaque_mask = opaque_mask
+        alpha_channel = image[:, :, 3]
+        rgb_image = image[:, :, :3]
     else:
-        current_opaque_mask = np.ones_like(rgb_image[:, :, 0], dtype=bool)
+        alpha_channel = None
+        rgb_image = image
 
-    for c in range(3):
-        channel = rgb_image[:, :, c]
-        lower_percentile, upper_percentile = config['contrast_percentiles']
-        min_val = np.percentile(channel[current_opaque_mask], lower_percentile)
-        max_val = np.percentile(channel[current_opaque_mask], upper_percentile)
-        if max_val > min_val:
-            scale = 255.0 / (max_val - min_val) if (max_val - min_val) != 0 else 1.0
-            channel = ((channel - min_val) * scale).clip(0, 255).astype(np.uint8)
-            rgb_image[:, :, c] = channel
-            callback(f"Channel {c} contrast stretched with min_val={min_val}, max_val={max_val}, scale={scale}")
+    # Create a mask to select only fully opaque pixels
+    if has_alpha:
+        opaque_mask = alpha_channel >= params['alpha_threshold']
+    else:
+        opaque_mask = np.ones_like(rgb_image[:, :, 0], dtype=bool)
 
-    # Gamma Correction (Common to Both LAB and RGB Paths)
-    gamma = config['gamma_correction']
+    # Prepare the RGB image for processing
+    rgb_image_uint8 = rgb_image.astype(np.uint8).copy()
+
+    # === Global Contrast Stretching ===
+    # Apply only to opaque pixels
+    for c in range(3):  # For each color channel
+        channel = rgb_image_uint8[:, :, c]
+        # Compute percentiles only on opaque pixels
+        lower_percentile, upper_percentile = params['contrast_percentiles']
+        min_val = np.percentile(channel[opaque_mask], lower_percentile)
+        max_val = np.percentile(channel[opaque_mask], upper_percentile)
+        # Avoid division by zero
+        if max_val - min_val == 0:
+            continue
+        # Stretch the histogram
+        channel = np.clip((channel - min_val) * (255 / (max_val - min_val)), 0, 255).astype(np.uint8)
+        rgb_image_uint8[:, :, c] = channel
+    # ==============================
+
+    # === Combined Brightness Adjustment and Brightness Range Adjustment ===
+
+    # Convert to LAB color space for brightness adjustments
+    lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab_image)
+
+    # User Brightness Adjustment
+    if brightness != 0.5:  # 0.5 is the neutral value
+        brightness_adjustment = (brightness - 0.5) * 200  # LAB L channel range is 0-100
+        l_channel = np.clip(l_channel + brightness_adjustment, 0, 255)
+
+    # Brightness Range Adjustment
+    l_min = np.percentile(l_channel[opaque_mask], 1)
+    l_max = np.percentile(l_channel[opaque_mask], 99)
+    l_channel = np.clip((l_channel - l_min) * ((max_brightness - min_brightness) / (l_max - l_min)) + min_brightness, 0, 255)
+
+    # Merge adjusted channels and convert back to RGB
+    lab_image = cv2.merge((l_channel.astype(np.uint8), a_channel, b_channel))
+    rgb_image_uint8 = cv2.cvtColor(lab_image, cv2.COLOR_LAB2RGB)
+
+
+    # === Gamma Correction ===
+    gamma = params['gamma_correction']
     if gamma != 1.0:
         invGamma = 1.0 / gamma
         table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(256)]).astype("uint8")
-        rgb_image = cv2.LUT(rgb_image, table)
-        callback(f"Applied gamma correction with gamma: {gamma}")
+        rgb_image_uint8 = cv2.LUT(rgb_image_uint8, table)
+    # ==============================
 
-    # Convert to HSV for Saturation Adjustment
-    hsv_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2HSV)
+    # === Unsharp Masking ===
+    unsharp_strength = params['unsharp_strength']
+    if unsharp_strength > 0:
+        blurred = cv2.GaussianBlur(rgb_image_uint8, (0, 0), params['unsharp_radius'])
+        sharpened = cv2.addWeighted(rgb_image_uint8, 1 + unsharp_strength, blurred, -unsharp_strength, 0)
+        rgb_image_uint8 = sharpened
+    # ==============================
+
+    # === Apply CLAHE to the L channel in LAB color space ===
+    lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab_image)
+
+    clahe = cv2.createCLAHE(clipLimit=params['clahe_clip_limit'], 
+                            tileGridSize=(params['clahe_grid_size'], params['clahe_grid_size']))
+    l_channel_clahe = clahe.apply(l_channel)
+
+    lab_image = cv2.merge((l_channel_clahe, a_channel, b_channel))
+    rgb_image_uint8 = cv2.cvtColor(lab_image, cv2.COLOR_LAB2RGB)
+    # ==============================
+
+    # === Selective Color Boosting ===
+    hsv_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2HSV)
     h = hsv_image[:, :, 0].astype(np.float32)
     s = hsv_image[:, :, 1].astype(np.float32)
+    v = hsv_image[:, :, 2].astype(np.float32)
 
-    # Handle Color Boosting
-    if auto_color_boost:
-        for ckey in color_key_array:
-            boost, threshold, color_mask = adjust_boost_threshold(ckey, use_lab, lab_image, hsv_image, config)
-            
-            # Apply boost to saturation where mask is True
-            s[color_mask] = np.clip(s[color_mask] * boost, 0, 255)
-            callback(f"Applied saturation boost for color {ckey['hex']} with boost: {boost}")
-    else:
-        for ckey in color_key_array:
-            hex_code = ckey['hex'].lstrip('#')
-            color_rgb = tuple(int(hex_code[i:i + 2], 16) for i in (0, 2, 4))
-            boost = ckey.get('boost', 1.2)
-            threshold = ckey.get('threshold', config['threshold_default'])
+    for color_key in color_key_array:
+        hex_code = color_key['hex'].lstrip('#')
+        color_rgb = tuple(int(hex_code[i:i + 2], 16) for i in (0, 2, 4))
 
-            if use_lab:
-                # Convert color to LAB
-                color_lab = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2LAB)[0, 0]
-                # Calculate Euclidean distance in LAB space
-                distance = np.linalg.norm(lab_image.astype(np.float32) - color_lab.astype(np.float32), axis=2)
-                color_mask = (distance < threshold)
-            else:
-                # Convert color to HSV
-                color_hsv = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2HSV)[0, 0]
-                target_h = color_hsv[0]
-                hue_diff = np.abs(h - target_h)
-                hue_diff = np.minimum(hue_diff, 180 - hue_diff)
-                color_mask = (hue_diff < threshold)
+        boost = color_key.get('boost', params['saturation_boost'])
+        threshold = color_key.get('threshold', 20)  # Default threshold
 
-            # Apply boost to saturation where mask is True
-            s[color_mask] = np.clip(s[color_mask] * boost, 0, 255)
-            callback(f"Manual Boost - Applied saturation boost for color {ckey['hex']} with boost: {boost}")
+        # Convert target color to HSV
+        color_hsv = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2HSV)[0, 0]
+        target_h = color_hsv[0]
+        target_s = color_hsv[1]
 
-    # Update the HSV image with adjusted saturation
+        # Calculate hue and saturation difference
+        hue_diff = np.abs(h - target_h)
+        hue_diff = np.minimum(hue_diff, 180 - hue_diff)  # Handle hue wrap-around
+
+        # Create a mask for pixels close to the target color
+        color_mask = (hue_diff < threshold) & opaque_mask
+
+        # Adjust saturation without hard clipping
+        s = np.where(color_mask, np.minimum(s * boost, 255), s)
+
+    # Convert back to RGB
     hsv_image[:, :, 1] = s
-    rgb_image = cv2.cvtColor(hsv_image.astype(np.uint8), cv2.COLOR_HSV2RGB)
+    rgb_image_uint8 = cv2.cvtColor(hsv_image.astype(np.uint8), cv2.COLOR_HSV2RGB)
+    # ==============================
 
-    # Unsharp Masking (Optional)
-    unsharp_strength = config['unsharp_strength']
-    if unsharp_strength > 0:
-        blurred = cv2.GaussianBlur(rgb_image, (0, 0), config['unsharp_radius'])
-        sharpened = cv2.addWeighted(rgb_image, 1 + unsharp_strength, blurred, -unsharp_strength, 0)
-        rgb_image = sharpened
-        callback(f"Applied unsharp masking with strength: {unsharp_strength}")
-
-    # Reintegrate Alpha Channel if Present
+    # Restore the original RGB values for non-opaque pixels
     if has_alpha:
-        # Ensure RGB image is uint8
-        rgb_image = rgb_image.astype(np.uint8)
-        # Restore original RGB values for non-opaque pixels
-        if opaque_mask is not None:
-            rgb_image[~opaque_mask] = image[:, :, :3][~opaque_mask]
-        # Merge with original alpha channel
-        preprocessed_image = np.dstack((rgb_image, alpha_channel))
+        rgb_image_uint8[~opaque_mask] = rgb_image[~opaque_mask]
+
+    # Convert back to RGBA if alpha channel was present
+    if has_alpha:
+        preprocessed_image = np.dstack((rgb_image_uint8, alpha_channel))
     else:
-        preprocessed_image = rgb_image
+        preprocessed_image = rgb_image_uint8
 
     return preprocessed_image
 
@@ -1312,7 +1268,7 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
         img = crop_to_solid_area(img)
         
         preview_path = exe_path_fs('game_data/stamp_preview/preview.png')
-        img.save(preview_path)
+        save_image(img, preview_path, color_key_array)
         if message_callback:
             message_callback(f"Preview saved at: {preview_path}")
 
@@ -1371,7 +1327,67 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
         if error_callback:
             error_callback(f"An error occurred: {e}")
 
+def save_image(img, preview_path, color_key_array):
+    """
+    Processes an RGBA PIL image by mapping pixels to colors based on a color key array
+    and a predefined COLOR key, then saves the result as a PNG.
 
+    Parameters:
+    - img: Input image as a PIL RGBA image.
+    - preview_path: Path to save the processed image.
+    - color_key_array: List of dictionaries with color information to match and transform.
+
+    Returns:
+    - None
+    """
+    # Define the COLOR key mapping numbers to new colors
+    COLOR_KEY = {
+        -1: (0, 0, 0, 0),         # FULL ALPHA (transparent)
+        0: (255, 231, 197, 255),  # 'ffe7c5'
+        1: (42, 56, 68, 255),     # '2a3844'
+        2: (215, 11, 93, 255),    # 'd70b5d'
+        3: (13, 179, 158, 255),   # '0db39e'
+        4: (244, 192, 9, 255),    # 'f4c009'
+        5: (255, 0, 255, 255),    # 'ff00ff'
+        6: (186, 195, 87, 255)    # 'bac357'
+    }
+
+    # Create a mapping from hex color to number using color_key_array
+    hex_to_number = {entry['hex']: entry['number'] for entry in color_key_array}
+
+    # Convert the image to a NumPy array for processing
+    img_array = np.array(img)  # Shape: (H, W, 4) for RGBA
+
+    # Separate alpha channel for transparency handling
+    rgb_array = img_array[:, :, :3]
+    alpha_channel = img_array[:, :, 3]
+
+    # Convert RGB values to hex for matching
+    def rgb_to_hex(rgb):
+        return '{:02x}{:02x}{:02x}'.format(*rgb)
+
+    # Initialize output array
+    output_array = np.zeros_like(img_array)
+
+    # Process each pixel
+    for y in range(img_array.shape[0]):
+        for x in range(img_array.shape[1]):
+            pixel_rgb = tuple(rgb_array[y, x])  # Current pixel RGB
+            pixel_hex = rgb_to_hex(pixel_rgb)  # Convert to hex
+
+            if alpha_channel[y, x] == 0:  # Fully transparent
+                output_array[y, x] = COLOR_KEY[-1]
+            elif pixel_hex in hex_to_number:  # Match found in color_key_array
+                color_number = hex_to_number[pixel_hex]
+                output_array[y, x] = COLOR_KEY.get(color_number, (0, 0, 0, 255))  # Default to black if not found
+            else:  # No match, leave it as black
+                output_array[y, x] = (0, 0, 0, 255)
+
+    # Convert the output array back to a PIL image
+    output_img = Image.fromarray(output_array, mode='RGBA')
+
+    # Save the processed image to the preview path
+    output_img.save(preview_path, format='PNG')
 
 def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag,
                          progress_callback=None, message_callback=None, error_callback=None):
@@ -1587,7 +1603,7 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
 
 
         # Generate preview GIF after all processing is done
-        create_preview_gif(total_frames, delays, preview_folder, progress_callback, message_callback, error_callback)
+        create_preview_gif(total_frames, delays, preview_folder, color_key_array, progress_callback, message_callback, error_callback)
 
         img.close()  # Close the image after processing
 
@@ -1677,8 +1693,7 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
             error_callback(f"An error occurred while saving frames: {e}")
 
 
-
-def create_preview_gif(total_frames, delays, preview_folder, progress_callback=None, message_callback=None, error_callback=None):
+def create_preview_gif(total_frames, delays, preview_folder, color_key_array, progress_callback=None, message_callback=None, error_callback=None):
     """
     Creates a new GIF using the frames in the 'Frames' directory and the delay data,
     then saves it as 'preview.gif' in the 'preview' folder.
@@ -1686,7 +1701,7 @@ def create_preview_gif(total_frames, delays, preview_folder, progress_callback=N
     try:
         frames_folder = exe_path_fs('game_data/frames')
         output_gif_path = exe_path_fs('game_data/stamp_preview/preview.gif')
-
+        color_key_array = 1
 
         frames = []
         frame_durations = []
@@ -1764,6 +1779,7 @@ def create_preview_gif(total_frames, delays, preview_folder, progress_callback=N
         if error_callback:
             error_callback(f"An error occurred in create_preview_gif: {e}")
 
+
 def create_and_clear_preview_folder(message_callback=None):
     """
     Creates and clears the 'preview' folder.
@@ -1790,7 +1806,20 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
     global use_lab
     use_lab = use_lab_flag
     global brightness
-    brightness = brightness_flag
+    mid_point = 0.5
+    lower_bound = -0.53
+    upper_bound = 1.53
+
+    # Calculate the delta
+    delta = brightness_flag - mid_point
+
+    if brightness_flag < mid_point:
+        # Darker side (compressed sensitivity)
+        brightness = mid_point + delta * abs(delta / (mid_point - lower_bound)) ** 1.75
+    else:
+        # Lighter side (stretched sensitivity)
+        brightness = mid_point + delta * abs(delta / (upper_bound - mid_point)) ** 1.25
+    
     try:
         if message_callback:
             message_callback("Initializing...")
@@ -1850,7 +1879,7 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
                 message_callback("Processing animated image...")
             # Save the image to a temporary path if it's from the clipboard
             if image_path == 'clip':
-                temp_image_path = exe_path_fs('exe_data/temp/clipboard_image.webp')
+                temp_image_path = exe_path_fs('imagePawcessor/exe_data/temp/clipboard_image.webp')
                 img.save(temp_image_path, 'WEBP')
                 image_path = temp_image_path
             process_and_save_gif(image_path, resize_dim, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag, progress_callback, message_callback, error_callback)
@@ -1924,6 +1953,7 @@ class CanvasWorker(QObject):
             5: 'ff00ff',
             6: 'bac357'
         }
+
 
     @Slot(str, str)  # Receives config_path and json_path as strings
     def process_canvas(self, config_path, json_path):
@@ -2364,13 +2394,13 @@ class MainWindow(QMainWindow):
             QCheckBox::indicator {{
                 width: 80px;
                 height: 80px;
-                image: url({exe_path_stylesheet("exe_data/font_stuff/tack.svg")});
+                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/tack.svg")});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet("exe_data/font_stuff/tack_down.svg")});
+                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/tack_down.svg")});
             }}
             QCheckBox::indicator:hover {{
-                image: url({exe_path_stylesheet("exe_data/font_stuff/tack_hover.svg")});
+                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/tack_hover.svg")});
             }}
         """)
         self.always_on_top_checkbox.setChecked(False)
@@ -2600,7 +2630,7 @@ class MainWindow(QMainWindow):
         """
         self.reset_movie()
         # 1. Gather images from menu_pics_dir
-        menu_pics_dir = exe_path_stylesheet("exe_data/menu_pics")
+        menu_pics_dir = exe_path_stylesheet("imagePawcessor/exe_data/menu_pics")
         if not os.path.exists(menu_pics_dir):
             QMessageBox.warning(self, "Error", f"Menu pictures directory not found: {menu_pics_dir}")
             return
@@ -2824,13 +2854,13 @@ class MainWindow(QMainWindow):
             QPushButton {{
                 border: none; 
                 background-color: transparent;
-                image: url({exe_path_stylesheet('exe_data/font_stuff/home.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home.svg')});
             }}
             QPushButton:hover {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/home_hover.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home_hover.svg')});
             }}    
             QPushButton:pressed {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/home_hover.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home_hover.svg')});
             }}
         """)
 
@@ -2847,13 +2877,13 @@ class MainWindow(QMainWindow):
             QPushButton {{
                 border: none; /* Remove any borders */
                 background-color: transparent; 
-                image: url({exe_path_stylesheet('exe_data/font_stuff/refresh.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/refresh.svg')});
             }}
             QPushButton:hover {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/refresh_hover.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/refresh_hover.svg')});
             }}    
             QPushButton:pressed {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/refresh_hover.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/refresh_hover.svg')});
             }}       
         """)
         self.refresh_button.setFixedSize(60, 60)  # Ensure consistent size
@@ -2916,10 +2946,10 @@ class MainWindow(QMainWindow):
                 height: 24px;
             }}
             QCheckBox::indicator:unchecked {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/uncheck.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/check.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')});
             }}
         """)
         ring_layout.addWidget(self.preprocess_checkbox)
@@ -2939,10 +2969,10 @@ class MainWindow(QMainWindow):
                 height: 24px;
             }}
             QCheckBox::indicator:unchecked {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/uncheck.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/check.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')});
             }}
         """)
         ring_layout.addWidget(self.bg_removal_checkbox)
@@ -2962,10 +2992,10 @@ class MainWindow(QMainWindow):
                 height: 24px;
             }}
             QCheckBox::indicator:unchecked {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/uncheck.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet('exe_data/font_stuff/check.svg')});
+                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')});
             }}
         """)
         ring_layout.addWidget(self.lab_color_checkbox)
@@ -2989,8 +3019,8 @@ class MainWindow(QMainWindow):
 
         # Brightness Slider
         self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
-        self.brightness_slider.setRange(0, 100)
-        self.brightness_slider.setValue(50)
+        self.brightness_slider.setRange(-53, 153)
+        self.brightness_slider.setValue(85)
         self.brightness_slider.setTickInterval(1)
         self.brightness_slider.setStyleSheet("""
             QSlider::groove:horizontal {
@@ -3296,23 +3326,23 @@ class MainWindow(QMainWindow):
         # Add Buttons
         buttons = [
             {
-                "normal": exe_path_stylesheet('exe_data/font_stuff/home.svg'),
-                "hover": exe_path_stylesheet("exe_data/font_stuff/home_hover.svg"),
+                "normal": exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home.svg'),
+                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home_hover.svg"),
                 "action": self.go_to_initial_menu,
             },
             {
-                "normal": exe_path_stylesheet("exe_data/font_stuff/save.svg"),
-                "hover": exe_path_stylesheet("exe_data/font_stuff/save_hover.svg"),
+                "normal": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/save.svg"),
+                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/save_hover.svg"),
                 "action": lambda: self.save_current(True),
             },
             {
-                "normal": exe_path_stylesheet("exe_data/font_stuff/rand.svg"),
-                "hover": exe_path_stylesheet("exe_data/font_stuff/rand_hover.svg"),
+                "normal": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rand.svg"),
+                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rand_hover.svg"),
                 "action": self.randomize_saved_stamps,
             },
             {
-                "normal": exe_path_stylesheet("exe_data/font_stuff/delete.svg"),
-                "hover": exe_path_stylesheet("exe_data/font_stuff/delete_hover.svg"),
+                "normal": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/delete.svg"),
+                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/delete_hover.svg"),
                 "action": lambda: self.toggle_delete_mode(True),
             },
         ]
@@ -3829,12 +3859,12 @@ class MainWindow(QMainWindow):
 
             # Dynamically set icons based on text color
             if text_color == "white":
-                unchecked_icon = exe_path_stylesheet('exe_data/font_stuff/uncheck_white.svg')
-                checked_icon = exe_path_stylesheet('exe_data/font_stuff/check_white.svg')
+                unchecked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck_white.svg')
+                checked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check_white.svg')
                 border_color = "#ffffff"  # White border for light text
             else:
-                unchecked_icon = exe_path_stylesheet('exe_data/font_stuff/uncheck.svg')
-                checked_icon = exe_path_stylesheet('exe_data/font_stuff/check.svg')
+                unchecked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')
+                checked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')
                 border_color = "#e3a8e6"
 
             # Store the border color
@@ -3939,7 +3969,7 @@ class MainWindow(QMainWindow):
 
             # Boost slider
             boost_slider = QSlider(Qt.Horizontal)
-            boost_slider.setRange(-1, 27)
+            boost_slider.setRange(0, 27)
             boost_slider.setValue(14)
             boost_slider.setTickInterval(1)
             boost_slider.setTickPosition(QSlider.TicksBelow)
@@ -4288,12 +4318,12 @@ class MainWindow(QMainWindow):
 
             # Reset Boost sliders to 1.2 (value 12)
             if color_number in self.boost_sliders:
-                self.boost_sliders[color_number].setValue(14)
+                self.boost_sliders[color_number].setValue(12)
                 self.boost_sliders[color_number].setVisible(True)  # Reset visibility
 
             # Reset Threshold sliders to 20
             if color_number in self.threshold_sliders:
-                self.threshold_sliders[color_number].setValue(20)
+                self.threshold_sliders[color_number].setValue(28)
                 self.threshold_sliders[color_number].setVisible(True)  # Reset visibility
 
             # Hide Boost and Threshold labels
@@ -4308,12 +4338,12 @@ class MainWindow(QMainWindow):
                 self.processing_method_changed("Color Match")
 
         else:
-            if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
-                self.processing_combobox.setCurrentText("Pattern Dither")
-                self.processing_method_changed("Pattern Dither", True)
+            if "Color Match" in [method["name"] for method in self.processing_methods]:
+                self.processing_combobox.setCurrentText("Color Match")
+                self.processing_method_changed("Color Match")
 
         self.preprocess_checkbox.setChecked(True)
-        self.lab_color_checkbox.setChecked(False)
+        self.lab_color_checkbox.setChecked(True)
         self.bg_removal_checkbox.setChecked(False)
         self.brightness_label.setVisible(True)
         self.brightness_slider.setVisible(True)
@@ -4324,7 +4354,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(True)
                 self.threshold_sliders[color_number].setVisible(True)
 
-
+        self.brightness_slider.setValue(85)
 
     def lab_value_toggle(self, checked):
         for color_number in self.boost_labels:
@@ -4336,6 +4366,9 @@ class MainWindow(QMainWindow):
                 if color_number in self.threshold_sliders:
                     self.threshold_sliders[color_number].setValue(20)
 
+                
+                self.brightness_slider.setValue(85)
+
 
             else:
 
@@ -4346,6 +4379,8 @@ class MainWindow(QMainWindow):
                 # Reset Threshold sliders to 20
                 if color_number in self.threshold_sliders:
                     self.threshold_sliders[color_number].setValue(28)
+                
+                self.brightness_slider.setValue(16)
 
 
 
@@ -4523,7 +4558,7 @@ class MainWindow(QMainWindow):
 
             self.preprocess_checkbox.setChecked(True)
             self.bg_removal_checkbox.setChecked(False)
-            self.lab_color_checkbox.setChecked(False)
+            self.lab_color_checkbox.setChecked(True)
 
             if self.back_button:
                 self.back_button.show()
@@ -4537,15 +4572,17 @@ class MainWindow(QMainWindow):
                     self.processing_method_changed("Color Match")
 
             else:
-                if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
-                    self.processing_combobox.setCurrentText("Pattern Dither")
-                    self.processing_method_changed("Pattern Dither", True)
+                if "Color Match" in [method["name"] for method in self.processing_methods]:
+                    self.processing_combobox.setCurrentText("Color Match")
+                    self.processing_method_changed("Color Match")
 
             for color_number in self.boost_labels:
                 self.boost_labels[color_number].setVisible(True)
                 self.boost_sliders[color_number].setVisible(True)
                 self.threshold_labels[color_number].setVisible(True)
                 self.threshold_sliders[color_number].setVisible(True)
+
+            self.brightness_slider.setValue(85)
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load image: {str(e)}")
@@ -4719,7 +4756,7 @@ class MainWindow(QMainWindow):
                 # Create slider
                 slider = QSlider(Qt.Horizontal)
                 slider.setRange(2, 16)  # Range for clusters
-                slider.setValue(12) 
+                slider.setValue(4) 
                 slider.setTickPosition(QSlider.TicksBelow)
                 slider.setTickInterval(1)  # Step size for clusters
                 slider.valueChanged.connect(self.parameter_value_changed)
@@ -4741,7 +4778,7 @@ class MainWindow(QMainWindow):
                     else:
                         value_label.setText("Lots")
                 slider.valueChanged.connect(update_value_label)
-                update_value_label(12)
+                update_value_label(4)
                 # Add slider layout to the form
                 self.method_options_layout.addRow(label, slider_layout)
 
@@ -4959,6 +4996,8 @@ class MainWindow(QMainWindow):
         if self.processing_thread.is_alive():
             QTimer.singleShot(100, self.monitor_thread)
             return
+        
+        self.reset_movie()
 
         self.progress_bar.setValue(100)
         self.status_label.setText("Processing complete!")
@@ -5168,7 +5207,7 @@ class MainWindow(QMainWindow):
 
         # Reset processing flags
         self.preprocess_checkbox.setChecked(True)
-        self.lab_color_checkbox.setChecked(False)
+        self.lab_color_checkbox.setChecked(True)
         self.bg_removal_checkbox.setChecked(False)
 
         # Ensure all boost and threshold elements are hidden
@@ -5454,7 +5493,7 @@ def initialize_saved():
         saved_stamps_json.unlink()
 
     # Path to the initial data directory
-    initial_dir = exe_path_fs("exe_data/saved_stamp_initial")
+    initial_dir = exe_path_fs("imagePawcessor/exe_data/saved_stamp_initial")
 
     # Copy contents of the initial directory to the AppData directory
     for item in initial_dir.iterdir():
@@ -5643,7 +5682,7 @@ if __name__ == '__main__':
     with open(pid_file, 'w') as f:
         f.write(str(os.getpid()))
     # Define the icon path and apply the icon
-    icon_path = exe_path_stylesheet("exe_data/icon.png")
+    icon_path = exe_path_stylesheet("imagePawcessor/exe_data/icon.png")
 
     app_icon = None
     if os.path.exists(icon_path):

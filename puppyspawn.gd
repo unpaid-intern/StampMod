@@ -72,7 +72,7 @@ var gui_path = null
 func _ready():
 	if debug:
 		img_path = "res://mods/PurplePuppy-Stamps/game_data/current_stamp_data/stamp.txt"
-		gui_path = "D:/Trash/GDWeave/mods/PurplePuppy-Stamps/imagePawcess.exe"
+		gui_path = "D:/Trash/GDWeave/mods/PurplePuppy-Stamps/imagePawcessor/launcher.exe"
 		frames_path = "res://mods/PurplePuppy-Stamps/game_data/current_stamp_data/frames.txt"
 	else:
 		img_path = key_handler.img_path
@@ -261,7 +261,7 @@ func _spawn_canvas(pos, _offset = 10):
 		# Spawn canvases at each offset
 		for offset in offsets:
 			var canvas_pos = pos + offset
-			canvas_pos.y -= 0.0083
+			canvas_pos.y -= 0.0084
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
 			print("Created new canvas at ", canvas_pos)
@@ -278,7 +278,7 @@ func _spawn_canvas(pos, _offset = 10):
 		four = false
 		var canvas_pos = Vector3.ZERO + pos
 		if grid == 0:
-			canvas_pos.y -= 0.0083
+			canvas_pos.y -= 0.0084
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
 			print("spawning at ", current_zone)
