@@ -1,8 +1,8 @@
 # Stamps
 A stamp and art saving mod for for WEBFISHING using GDWeave
 
-<p align="center">
-  <img src="https://github.com/unpaid-intern/StampMod/blob/dcdaf02acb6fb342d23e4b34116d9ebc933d3c84/README.png" alt="UNDERTALE CLICKBAIT"/>
+<p align="left">
+  <img src="https://github.com/unpaid-intern/StampMod/blob/dcdaf02acb6fb342d23e4b34116d9ebc933d3c84/README.png?raw=true" alt="UNDERTALE CLICKBAIT"/>
 </p>
 
 
