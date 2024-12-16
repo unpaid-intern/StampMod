@@ -5,12 +5,13 @@ import threading
 import tempfile
 import json
 import time
+import math
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import webbrowser
 import cv2 
 # Image processing libraries
-from PIL import Image, ImageSequence, ImageGrab, ImageQt, ImageFilter, UnidentifiedImageError
+from PIL import Image, ImageSequence, ImageGrab, ImageQt, ImageFilter, UnidentifiedImageError, ImageDraw
 import numpy as np
 import logging
 import shutil
@@ -2089,7 +2090,6 @@ class HoverButton(QPushButton):
         self.setIcon(self.default_icon)
         super().leaveEvent(event)
 
-
 class CropLabel(QLabel):
     crop_started = Signal(QPoint)
     crop_updated = Signal(QPoint)
@@ -2111,8 +2111,8 @@ class CropLabel(QLabel):
             self.main_window.push_undo_stack()
             self.crop_started.emit(event.position().toPoint())
             self.update()
-        elif self.main_window.erase_mode and event.button() == Qt.LeftButton:
-            self.erase_pixel.emit(event.position().toPoint())
+#        elif self.main_window.erase_mode and event.button() == Qt.LeftButton:
+#            self.erase_pixel.emit(event.position().toPoint())
         else:
             super().mousePressEvent(event)
 
@@ -2121,12 +2121,13 @@ class CropLabel(QLabel):
             self.crop_rect.setBottomRight(event.position().toPoint())
             self.crop_updated.emit(event.position().toPoint())
             self.update()
+        """
         elif self.main_window.erase_mode and event.buttons() & Qt.LeftButton:
             self.erase_pixel.emit(event.position().toPoint())
             self.update()  # Trigger repaint for eraser outline
         else:
             super().mouseMoveEvent(event)
-
+        """
     def mouseReleaseEvent(self, event):
         if self.main_window.crop_mode and event.button() == Qt.LeftButton and self.is_drawing:
             self.is_drawing = False
@@ -2143,6 +2144,7 @@ class CropLabel(QLabel):
             pen = QPen(Qt.red, 2, Qt.DashLine)
             painter.setPen(pen)
             painter.drawRect(self.crop_rect.normalized())
+        """
         elif self.main_window.erase_mode:
             # Draw the eraser outline
             cursor_pos = QCursor.pos()
@@ -2153,9 +2155,14 @@ class CropLabel(QLabel):
                 pen = QPen(Qt.green, 1, Qt.SolidLine)
                 painter.setPen(pen)
                 painter.setBrush(Qt.NoBrush)
-                painter.drawEllipse(widget_pos, self.main_window.eraser_size, self.main_window.eraser_size)
-
-
+                
+                # Calculate the display eraser size
+                # Average the scaling factors for uniform scaling
+                avg_scale = (self.main_window.scale_x + self.main_window.scale_y) / 2
+                eraser_size_display = self.main_window.eraser_size / avg_scale
+                
+                painter.drawEllipse(widget_pos, eraser_size_display, eraser_size_display)
+        """
 
 class ImageProcessingThread(threading.Thread):
     def __init__(self, params, signals):
@@ -2197,6 +2204,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.back_button = None
+        self._is_dragging = False
+        self._drag_position = QPoint()
         self.delete_mode = False
         self.last_message_displayed = None
         self.connected = False
@@ -2226,13 +2235,13 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
         self.move_to_bottom_right()
+        self.padding_x = 0
+        self.padding_y = 0
         self._is_dragging = False
         self.crop_mode = False
         self.drag_enabled = True
         self.temp_canvas_path = ""
         self._drag_position = QPoint()
-        self.erase_mode = False
-        self.eraser_size = 6 
         self.original_image_path = ""
         self.undo_stack = []
         # Initialize variables
@@ -2277,11 +2286,40 @@ class MainWindow(QMainWindow):
                     stop:0 #6a0080, stop:1 #880e4f);
             }
         """
-
+        undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        undo_shortcut.activated.connect(self.undo_action)
         # Setup UI
         self.setup_ui()
         self.init_worker()
         #self.bring_to_front()
+
+    def mousePressEvent(self, event):
+        if (
+            event.button() == Qt.LeftButton
+            and not self.crop_mode
+#            and not self.erase_mode
+            # Optionally, restrict dragging to certain areas
+        ):
+            self._is_dragging = True
+            self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._is_dragging:
+            new_pos = event.globalPosition().toPoint() - self._drag_position
+            self.move(new_pos)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._is_dragging:
+            self._is_dragging = False
+            event.accept()
+        else:
+            super().mouseReleaseEvent(event)
 
     def init_worker(self):
         # Initialize worker and thread
@@ -2295,8 +2333,6 @@ class MainWindow(QMainWindow):
         self.worker.images_finished.connect(self.on_images_finished)
         
         # Shortcut for Undo (Ctrl+Z)
-        undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
-        undo_shortcut.activated.connect(self.undo_action)
         
     def move_to_bottom_right(self):
         """
@@ -2836,18 +2872,29 @@ class MainWindow(QMainWindow):
         self.image_label_canvas = CropLabel(self)
         self.image_label_canvas.setFixedSize(512, 512)
         self.image_label_canvas.setStyleSheet("border: 1px solid #7b1fa2; background: #000000;")
+        with Image.open(self.temp_canvas_path) as img:
+            original_size = img.size
+        self.scale_x = original_size[0] / self.image_label_canvas.width()
+        self.scale_y = original_size[1] / self.image_label_canvas.height()
+
         pixmap = QPixmap(self.temp_canvas_path).scaled(
             self.calculate_display_size(self.temp_canvas_path),
             Qt.KeepAspectRatio,
             Qt.FastTransformation
         )
         self.image_label_canvas.setPixmap(pixmap)
+        self.image_label_canvas.setAlignment(Qt.AlignCenter)  # Center alignment
+
+        # Store scaling factors in the CropLabel
+        self.image_label_canvas.scale_x = self.scale_x
+        self.image_label_canvas.scale_y = self.scale_y
         image_tools_layout.addWidget(self.image_label_canvas, alignment=Qt.AlignLeft)
 
         # Connect CropLabel signals
         self.image_label_canvas.crop_started.connect(self.on_crop_started)
         self.image_label_canvas.crop_updated.connect(self.on_crop_updated)
         self.image_label_canvas.crop_finished.connect(self.on_crop_finished)
+        self.image_label_canvas.erase_pixel.connect(self.handle_erase)
 
         # Column of tool buttons aligned to the right of the image
         tools_layout = QVBoxLayout()
@@ -2857,13 +2904,26 @@ class MainWindow(QMainWindow):
         # Add a spacer at the top
         tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
 
+        # Undo Button
+        undo_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo_hover.svg")
+        )
+        undo_button.setFixedSize(80,80)
+        undo_button.setIconSize(QSize(80,80))
+        undo_button.clicked.connect(self.undo_action)
+        tools_layout.addWidget(undo_button, alignment=Qt.AlignCenter)
+
+        # Add a spacer at the bottom
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
         # Rotate Left Button
         rotate_left_button = HoverButton(
             exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_left.svg"),
             exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_left_hover.svg")
         )
-        rotate_left_button.setFixedSize(60, 60)
-        rotate_left_button.setIconSize(QSize(60, 60))
+        rotate_left_button.setFixedSize(80,80)
+        rotate_left_button.setIconSize(QSize(80,80))
         rotate_left_button.clicked.connect(lambda: self.rotate_image(90))
         tools_layout.addWidget(rotate_left_button, alignment=Qt.AlignCenter)
 
@@ -2875,8 +2935,8 @@ class MainWindow(QMainWindow):
             exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_right.svg"),
             exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_right_hover.svg")
         )
-        rotate_right_button.setFixedSize(60, 60)
-        rotate_right_button.setIconSize(QSize(60, 60))
+        rotate_right_button.setFixedSize(80,80)
+        rotate_right_button.setIconSize(QSize(80,80))
         rotate_right_button.clicked.connect(lambda: self.rotate_image(-90))
         tools_layout.addWidget(rotate_right_button, alignment=Qt.AlignCenter)
 
@@ -2885,15 +2945,15 @@ class MainWindow(QMainWindow):
 
         # Crop Mode Checkbox with SVGs
         self.crop_checkbox = QCheckBox()
-        self.crop_checkbox.setFixedSize(60, 60)
+        self.crop_checkbox.setFixedSize(80,80)
         self.crop_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 background: transparent;
                 border: none;
             }}
             QCheckBox::indicator {{
-                width: 60px;
-                height: 60px;
+                width: 80px;
+                height: 80px;
                 image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop.svg")});
             }}
             QCheckBox::indicator:checked {{
@@ -2908,52 +2968,58 @@ class MainWindow(QMainWindow):
 
         # Spacer between Crop Checkbox and Erase Button
         tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
-
-        # Erase Button
-        eraser_size_label = QLabel("Eraser Size:")
-        eraser_size_label.setStyleSheet("color: white;")
-        tools_layout.addWidget(eraser_size_label, alignment=Qt.AlignCenter)
-
-        self.eraser_size_slider = QSlider(Qt.Horizontal)
-        self.eraser_size_slider.setMinimum(2)
-        self.eraser_size_slider.setMaximum(50)
-        self.eraser_size_slider.setValue(6)
-        self.eraser_size_slider.setTickPosition(QSlider.TicksBelow)
-        self.eraser_size_slider.setTickInterval(2)
-        self.eraser_size_slider.valueChanged.connect(self.update_eraser_size)
-        tools_layout.addWidget(self.eraser_size_slider, alignment=Qt.AlignCenter)
-
-        # Erase Button (Modify to toggle erase mode)
-        erase_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase_hover.svg")
-        )
-        erase_button.setFixedSize(60, 60)
-        erase_button.setIconSize(QSize(60, 60))
-        erase_button.setCheckable(True)
-        erase_button.clicked.connect(self.toggle_erase_mode)
-        tools_layout.addWidget(erase_button, alignment=Qt.AlignCenter)
+        """
+        self.erase_checkbox = QCheckBox()
+        self.erase_checkbox.setFixedSize(60, 60)
+        self.erase_checkbox.setStyleSheet(f"""
+#            QCheckBox {{
+#               background: transparent;
+#               border: none;
+#            }}
+#            QCheckBox::indicator {{
+#                width: 60px;
+#                height: 60px;
+#                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase.svg")});
+#            }}
+#            QCheckBox::indicator:checked {{
+#                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase_on.svg")});
+#            }}
+#            QCheckBox::indicator:hover {{
+#                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase_hover.svg")});
+#            }}
+        """)
+        self.erase_checkbox.stateChanged.connect(self.toggle_erase_mode)
+        tools_layout.addWidget(self.erase_checkbox, alignment=Qt.AlignCenter)
         # Spacer between Erase Button and Undo Button
         tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
-
-        # Undo Button
-        undo_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo_hover.svg")
-        )
-        undo_button.setFixedSize(60, 60)
-        undo_button.setIconSize(QSize(60, 60))
-        undo_button.clicked.connect(self.undo_action)
-        tools_layout.addWidget(undo_button, alignment=Qt.AlignCenter)
-
-        # Add a spacer at the bottom
-        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
-
+        """
         # Add the tools layout to the image-tools layout
         image_tools_layout.addLayout(tools_layout)
 
         # Add the image-tools layout to the main layout
         layout.addLayout(image_tools_layout)
+
+        """
+        eraser_controls_layout = QHBoxLayout()
+        # Eraser Size Label
+        eraser_size_label = QLabel("Eraser size in pixels:")
+        eraser_size_label.setStyleSheet("color: white; font-size: 14px;")
+        eraser_controls_layout.addWidget(eraser_size_label, alignment=Qt.AlignVCenter)
+
+        # Eraser Size Slider
+        self.eraser_size_slider = QSlider(Qt.Horizontal)
+        self.eraser_size_slider.setMinimum(2)
+        self.eraser_size_slider.setMaximum(30)
+        self.eraser_size_slider.setValue(6)
+        self.eraser_size_slider.setTickPosition(QSlider.TicksBelow)
+        self.eraser_size_slider.setTickInterval(2)
+        self.eraser_size_slider.valueChanged.connect(self.update_eraser_size)
+        self.eraser_size_slider.setFixedWidth(150)  # Adjust width as needed
+        eraser_controls_layout.addWidget(self.eraser_size_slider, alignment=Qt.AlignVCenter)
+
+        # Add the eraser controls layout to the main layout (beneath image and tools)
+        layout.addLayout(eraser_controls_layout)
+        """
 
         # Save and Reset Buttons
         buttons_layout = QHBoxLayout()
@@ -2964,7 +3030,7 @@ class MainWindow(QMainWindow):
             QPushButton {
                 background-color: #7b1fa2;
                 color: white;
-                font-size: 20px;
+                font-size: 50px;
                 font-weight: bold;
                 padding: 10px 20px;
                 border: none;
@@ -2974,7 +3040,7 @@ class MainWindow(QMainWindow):
                 background-color: #9c27b0;
             }
         """)
-        save_button.clicked.connect(self.save_image)
+        save_button.clicked.connect(lambda: self.process_png_to_stamp(self.temp_canvas_path))
         buttons_layout.addWidget(save_button)
 
         reset_button = QPushButton("Reset")
@@ -2982,7 +3048,7 @@ class MainWindow(QMainWindow):
             QPushButton {
                 background-color: #ba000d;
                 color: white;
-                font-size: 20px;
+                font-size: 50px;
                 font-weight: bold;
                 padding: 10px 20px;
                 border: none;
@@ -3001,8 +3067,8 @@ class MainWindow(QMainWindow):
         self.menu2_widget.setLayout(layout)
         self.stacked_widget.addWidget(self.menu2_widget)
         # After connecting crop signals
+        
         self.image_label_canvas.erase_pixel.connect(self.handle_erase)
-
 
     def update_eraser_size(self, value):
         """
@@ -3010,25 +3076,32 @@ class MainWindow(QMainWindow):
         """
         self.eraser_size = value
         print(f"Eraser size set to: {self.eraser_size}")  # Debug statement
+        self.image_label_canvas.update()  # Trigger repaint to update the preview
 
 
-    def toggle_erase_mode(self, checked):
+    def toggle_erase_mode(self, state):
         """
-        Toggles the erase mode on or off based on the button state.
+        Toggle erase mode on or off based on the checkbox state.
         """
-        if checked:
+        self.update_scaling_factors()
+        if state:
             self.erase_mode = True
-            self.crop_mode = False  # Disable crop mode if erase is activated
-            self.crop_checkbox.setChecked(False)
+            # Deactivate Crop Mode if active
+            if self.crop_checkbox.isChecked():
+                self.crop_checkbox.setChecked(False)
             self.drag_enabled = False  # Disable window dragging during erase
             self.image_label_canvas.setCursor(Qt.PointingHandCursor)
-            self.push_undo_stack()  # Save state for undo
+            self.push_undo_stack()  # Save state for undo (only once)
             print("Erase mode enabled")  # Debug statement
         else:
             self.erase_mode = False
             self.drag_enabled = True  # Re-enable window dragging
             self.image_label_canvas.setCursor(Qt.ArrowCursor)
+            self.image_label_canvas.current_mouse_pos = QPoint()  # Reset mouse position
+            self.image_label_canvas.update()  # Remove eraser outline
             print("Erase mode disabled")  # Debug statement
+
+
 
     def calculate_display_size(self, image_path):
         """
@@ -3051,13 +3124,19 @@ class MainWindow(QMainWindow):
         """
         if state:
             self.crop_mode = True
+            # Deactivate Erase Mode if active
+#            if self.erase_checkbox.isChecked():
+#                self.erase_checkbox.setChecked(False)
             self.drag_enabled = False  # Disable window dragging during crop
             self.image_label_canvas.setCursor(Qt.CrossCursor)
             self.push_undo_stack()  # Save state for undo
+            print("Crop mode enabled")  # Debug statement
         else:
             self.crop_mode = False
             self.drag_enabled = True  # Re-enable window dragging
             self.image_label_canvas.setCursor(Qt.ArrowCursor)
+            print("Crop mode disabled")  # Debug statement
+
 
     def on_crop_started(self, point):
         """
@@ -3089,7 +3168,7 @@ class MainWindow(QMainWindow):
         # Clear the crop rectangle to remove artifacts
         self.image_label_canvas.crop_rect = QRect()
         self.image_label_canvas.update()
-
+     
     def perform_crop(self):
         """
         Crops the image based on the drawn rectangle and updates the display.
@@ -3152,6 +3231,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred during cropping: {e}")
 
+
     def update_display(self, image_path):
         """
         Updates the QLabel to display the image at image_path, scaling the largest dimension to 512px.
@@ -3164,7 +3244,46 @@ class MainWindow(QMainWindow):
             Qt.FastTransformation
         )
         self.image_label_canvas.setPixmap(scaled_pixmap)
+        self.image_label_canvas.setAlignment(Qt.AlignCenter)  # Center the pixmap
         self.image_label_canvas.update()
+
+    def update_scaling_factors(self):
+        """
+        Recalculates and updates the scaling factors and padding offsets based on the current image size.
+        """
+        label_size = self.image_label_canvas.size()
+        try:
+            with Image.open(self.temp_canvas_path) as img:
+                original_size = img.size
+            self.scale_x = original_size[0] / float(label_size.width())
+            self.scale_y = original_size[1] / float(label_size.height())
+
+            # Calculate scaling factors in CropLabel
+            self.image_label_canvas.scale_x = self.scale_x
+            self.image_label_canvas.scale_y = self.scale_y
+
+            # Calculate padding offsets based on aspect ratio
+            pixmap = QPixmap(self.temp_canvas_path).scaled(
+                label_size,
+                Qt.KeepAspectRatio,
+                Qt.FastTransformation
+            )
+            self.image_label_canvas.setPixmap(pixmap)
+            pixmap_width = pixmap.width()
+            pixmap_height = pixmap.height()
+
+            padding_x = (label_size.width() - pixmap_width) / 2.0
+            padding_y = (label_size.height() - pixmap_height) / 2.0
+
+            self.image_label_canvas.padding_x = padding_x
+            self.image_label_canvas.padding_y = padding_y
+
+            self.image_label_canvas.update()
+            print(f"Scaling factors updated: scale_x={self.scale_x}, scale_y={self.scale_y}")
+            print(f"Padding updated: padding_x={self.padding_x}, padding_y={self.padding_y}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to update scaling factors: {e}")
 
 
     def rotate_image(self, angle):
@@ -3172,46 +3291,71 @@ class MainWindow(QMainWindow):
         Rotates the image by the specified angle and updates the display while preserving aspect ratio.
         """
         try:
+            self.push_undo_stack()  # Save state before rotating
             with Image.open(self.temp_canvas_path) as img:
-                # Rotate the image without resizing, allowing it to expand to fit the rotated image
                 rotated_img = img.rotate(angle, expand=True)
                 rotated_img.save(self.temp_canvas_path)
             self.update_display(self.temp_canvas_path)
+            self.update_scaling_factors()  # Update scaling after rotation
+            print(f"Image rotated by {angle} degrees.")  # Debug statement
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to rotate image: {e}")
-
 
     def handle_erase(self, point):
         """
         Erases pixels in a circular area around the given point.
         """
-        # Calculate the pixel position based on the QLabel's coordinate system
-        label_size = self.image_label_canvas.size()
         try:
             with Image.open(self.temp_canvas_path) as img:
                 img = img.convert("RGBA")
                 original_size = img.size
-                scale_x = original_size[0] / label_size.width()
-                scale_y = original_size[1] / label_size.height()
 
-                # Map the point to the original image coordinates
-                original_x = int(point.x() * scale_x)
-                original_y = int(point.y() * scale_y)
+                # Retrieve scaling factors and padding from image_label_canvas
+                scale_x = self.image_label_canvas.scale_x
+                scale_y = self.image_label_canvas.scale_y
+                padding_x = self.image_label_canvas.padding_x
+                padding_y = self.image_label_canvas.padding_y
 
-                # Define the eraser radius
-                radius = self.eraser_size
+                print(f"handle_erase called with point: {point}")
+                print(f"scale_x: {scale_x}, scale_y: {scale_y}")
+                print(f"padding_x: {padding_x}, padding_y: {padding_y}")
 
-                # Iterate over the pixels within the eraser circle
-                for x in range(original_x - radius, original_x + radius + 1):
-                    for y in range(original_y - radius, original_y + radius + 1):
-                        if 0 <= x < original_size[0] and 0 <= y < original_size[1]:
-                            if (x - original_x) ** 2 + (y - original_y) ** 2 <= radius ** 2:
-                                img.putpixel((x, y), (0, 0, 0, 0))  # Make pixel fully transparent
+                # Adjust the cursor position by removing padding
+                adjusted_x = point.x() - padding_x
+                adjusted_y = point.y() - padding_y
+
+                print(f"Adjusted coordinates: ({adjusted_x}, {adjusted_y})")
+
+                # Ensure the adjusted coordinates are within the image_label_canvas area
+                if (adjusted_x < 0 or adjusted_y < 0 or
+                    adjusted_x > self.image_label_canvas.pixmap().width() or
+                    adjusted_y > self.image_label_canvas.pixmap().height()):
+                    # Cursor is outside the image area; do not erase
+                    print("Cursor is outside the image area; skipping erase.")
+                    return
+
+                # Map the point to the original image coordinates with precise scaling
+                original_x = int(round(adjusted_x * scale_x))
+                original_y = int(round(adjusted_y * scale_y))
+
+                print(f"Original image coordinates: ({original_x}, {original_y})")
+
+                # Define the eraser radius (scaled appropriately)
+                avg_scale = (scale_x + scale_y) / 2
+                radius = int(round(self.eraser_size * avg_scale))
+
+                print(f"Eraser radius: {radius}")
+
+                # Use ImageDraw for efficient erasing
+                draw = ImageDraw.Draw(img)
+                # Draw a fully transparent circle
+                draw.ellipse(
+                    (original_x - radius, original_y - radius,
+                    original_x + radius, original_y + radius),
+                    fill=(0, 0, 0, 0)  # Fully transparent
+                )
 
                 img.save(self.temp_canvas_path)
-
-            # Update the display
-            self.update_display(self.temp_canvas_path)
 
         except FileNotFoundError:
             QMessageBox.critical(self, "Error", f"The file at {self.temp_canvas_path} does not exist.")
@@ -3219,6 +3363,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "Cannot identify the image file.")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred during erasing: {e}")
+
+        # Update the display
+        self.update_display(self.temp_canvas_path)
+
 
 
     def save_image(self):
@@ -3240,7 +3388,7 @@ class MainWindow(QMainWindow):
         try:
             shutil.copy(self.original_image_path, self.temp_canvas_path)
             self.update_display(self.temp_canvas_path)
-            QMessageBox.information(self, "Reset", "Image has been reset to original.")
+            self.show_floating_message("Reset!")
             self.undo_stack.clear()  # Clear undo history on reset
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to reset image: {e}")
@@ -3263,7 +3411,7 @@ class MainWindow(QMainWindow):
         Undoes the last action.
         """
         if not self.undo_stack:
-            QMessageBox.information(self, "Undo", "Nothing to undo.")
+            self.show_floating_message("Nothing to undo.")
             return
         try:
             last_img = self.undo_stack.pop()
@@ -3271,30 +3419,6 @@ class MainWindow(QMainWindow):
             self.update_display(self.temp_canvas_path)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to undo action: {e}")
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton and self.drag_enabled:
-            child = self.childAt(event.position().toPoint())
-            if child is None or not isinstance(child, (QPushButton, QCheckBox)):
-                self._is_dragging = True
-                self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-                event.accept()
-            else:
-                self._is_dragging = False
-        else:
-            super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event):
-        if self._is_dragging and self.drag_enabled:
-            self.move(event.globalPosition().toPoint() - self._drag_position)
-            event.accept()
-        else:
-            super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._is_dragging = False
-        super().mouseReleaseEvent(event)
 
 
 
@@ -3338,10 +3462,128 @@ class MainWindow(QMainWindow):
         self.processing = False
         if success:
             print("Image generation completed successfully!")
-        self.update_save_menu1(exe_path_fs("game_data/game_canvises"))
+            self.update_save_menu1(exe_path_fs("game_data/game_canvises"))
 
 
+    def process_png_to_stamp(self, input_png_path):
+        """
+        Processes a PNG image and saves its data in a text file with color mappings.
+        Also manages the preview directory by clearing it and copying the input PNG.
 
+        Parameters:
+            input_png_path (str): The file path to the input PNG image.
+        """
+        # Helper function to convert hex color to RGB tuple
+        def hex_to_rgb(hex_color):
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) != 6:
+                raise ValueError(f"Invalid hex color: {hex_color}")
+            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+        # Helper function to find the closest color number from the color key
+        def find_closest_color(target_rgb, color_key_rgb):
+            min_distance = float('inf')
+            closest_color_num = None
+            for idx, color in enumerate(color_key_rgb):
+                distance = math.sqrt(
+                    (target_rgb[0] - color[0]) ** 2 +
+                    (target_rgb[1] - color[1]) ** 2 +
+                    (target_rgb[2] - color[2]) ** 2
+                )
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_color_num = idx
+            return closest_color_num
+
+        try:
+            # Define color key as per the provided mapping
+            color_key = {
+                0: 'ffe7c5',
+                1: '2a3844',
+                2: 'd70b5d',
+                3: '0db39e',
+                4: 'f4c009',
+                5: 'ff00ff',
+                6: 'bac357'
+            }
+
+            # Convert hex colors to RGB tuples
+            color_key_rgb = [hex_to_rgb(color_key[i]) for i in range(len(color_key))]
+
+            # Paths
+            preview_dir = exe_path_fs('game_data/stamp_preview/')
+            preview_image_path = os.path.join(preview_dir, 'preview.png')
+            current_stamp_dir = exe_path_fs('game_data/current_stamp_data/')
+            stamp_txt_path = os.path.join(current_stamp_dir, 'stamp.txt')
+
+            # Step 1: Manage Preview Directory
+            if os.path.exists(preview_dir):
+                # Clear the directory
+                shutil.rmtree(preview_dir)
+            # Recreate the directory
+            os.makedirs(preview_dir, exist_ok=True)
+            # Copy the input PNG to the preview directory as 'preview.png'
+            shutil.copyfile(input_png_path, preview_image_path)
+            print(f"Preview directory cleared and '{input_png_path}' copied to '{preview_image_path}'.")
+
+            # Step 2: Process the Image
+            with Image.open(input_png_path) as img:
+                img = img.convert('RGBA')  # Ensure image has an alpha channel
+                width, height = img.size
+                pixels = img.load()
+
+            # Calculate scaled dimensions
+            scaled_width = round(width * 0.1, 1)
+            scaled_height = round(height * 0.1, 1)
+
+            # Ensure the output directory exists
+            os.makedirs(current_stamp_dir, exist_ok=True)
+
+            with open(stamp_txt_path, 'w') as f:
+                # Write the first line with scaled dimensions
+                f.write(f"{scaled_width},{scaled_height},img\n")
+                print(f"Scaled dimensions written: {scaled_width},{scaled_height},img")
+
+                # Iterate through pixels from bottom to top, left to right
+                for y in range(height - 1, -1, -1):
+                    for x in range(width):
+                        pixel = pixels[x, y]
+
+                        # Extract RGBA values
+                        if len(pixel) == 4:
+                            r, g, b, a = pixel
+                        elif len(pixel) == 3:
+                            r, g, b = pixel
+                            a = 255
+                        else:
+                            print(f"Unexpected pixel format at ({x}, {y}): {pixel}")
+                            continue  # Skip unexpected formats
+
+                        # Skip pixels with alpha <= 191
+                        if a <= 191:
+                            continue
+
+                        # Find the closest color number from the color key
+                        closest_color_num = find_closest_color((r, g, b), color_key_rgb)
+
+                        if closest_color_num is None:
+                            print(f"No matching color found for pixel at ({x}, {y}): ({r}, {g}, {b})")
+                            continue  # Skip if no matching color is found
+
+                        # Scale the coordinates
+                        scaled_x = round(x * 0.1, 1)
+                        scaled_y = round((height - 1 - y) * 0.1, 1)
+
+                        # Write to the file
+                        f.write(f"{scaled_x},{scaled_y},{closest_color_num}\n")
+
+            print(f"Processing complete! Output saved to: {stamp_txt_path}")
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
+
+        self.save_current()
+        self.go_to_initial_menu(True)
 
     def toggle_always_on_top(self, checked):
         """
@@ -3463,7 +3705,7 @@ class MainWindow(QMainWindow):
 
         # Resize the image while maintaining aspect ratio
         if pixmap.width() > 680 or pixmap.height() > 460:
-            transformation_mode = Qt.SmoothTransformation  # Downscaling
+            transformation_mode = Qt.FastTransformation  # Downscaling
         else:
             transformation_mode = Qt.FastTransformation  # Upscaling
 
@@ -4512,11 +4754,16 @@ class MainWindow(QMainWindow):
         """
         Switch to the save menu screen.
         """
+
+
         global first 
         if not first:
             cleanup_saved_stamps()
             first = True
 
+        if self.processing:
+            return
+        
         self.repopulate_grid()
         if not hasattr(self, 'thumbnail_data'):
             self.load_thumbnail_data()
@@ -4998,6 +5245,8 @@ class MainWindow(QMainWindow):
         # Open file dialog
         if not hasattr(self, 'secondary_widget'):
             self.setup_secondary_menu()
+        if self.processing:
+            return
         self.reset_to_initial_state()     
         file_dialog = QFileDialog(self)
         file_dialog.setNameFilters(["Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"])
@@ -5024,8 +5273,13 @@ class MainWindow(QMainWindow):
         Handles retrieving image content from the clipboard, ensuring proper handling of
         both static and animated images. Saves the clipboard image as a WebP file for further processing.
         """
+
+
         if not hasattr(self, 'secondary_widget'):
             self.setup_secondary_menu()
+
+        if self.processing:
+            return
 
         self.canpaste = False
         try:

@@ -28,3 +28,4 @@ got ctrl z to function and changed keybinds
 - improved ctrl z logic
 - more stamps off-canvas
 - antivirus?? is a problem?
+- add an eraser (i quit)
