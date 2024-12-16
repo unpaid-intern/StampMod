@@ -10,6 +10,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 # General Information
 - **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Scanner, SecureAge, VirIT, Skyhigh (SWG), Sangfor Engine Zero, or Zillya antivirus (no it's **not a virus** lol)
 - The stamps menu might take a moment to launch the first time
+- Currently only works for **Windows**
 - You can **paste images** into the menu directly or **select a file**
 - Stamps are automatically adjusted to be **upright relative to the player camera**
 - In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
@@ -88,7 +89,9 @@ Choose what chalk colors to use by **enabling** or **disabling** them.
 - **Turn LAB On**: For images with subtle gradients or color shifts where precise matching matters.  
 - **Turn LAB Off**: For bold, flat colors... I think?
 
-Basically, if you aren't happy with a result, try turning it off! It's on by default but not always better **:3**
+Basically, if you aren't happy with a result, try turning it off! It's on by default but not always better~
+
+Sometimes **disabling green chalk** will make LAB results look better **:3**
 
 
 

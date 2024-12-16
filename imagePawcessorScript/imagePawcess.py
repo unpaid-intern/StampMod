@@ -25,10 +25,10 @@ from PySide6.QtWidgets import (
     QFormLayout, QGridLayout, QSpacerItem, QFrame, QStackedLayout, QScrollArea
 )
 from PySide6.QtGui import (
-    QPixmap, QMovie, QIcon, QPainter, QCursor, QImage
+    QPixmap, QMovie, QIcon, QPainter, QCursor, QImage, QPen, QMouseEvent, QKeySequence, QShortcut
 )
 from PySide6.QtCore import (
-    Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot
+    Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot, QRect
 )
 
 
@@ -772,7 +772,7 @@ def hybrid_dithering(img, color_key, params):
 
 @register_processing_method(
     'Pattern Dither',
-    default_params={'strength': 0.75},
+    default_params={'strength': 0.20},
     description="Uses an 8x8 Bayer matrix to apply dithering in a pattern. Pretty :3"
 )
 def ordered_dithering(img, color_key, params):
@@ -2052,9 +2052,13 @@ class CanvasWorker(QObject):
                         pixels[x, y] = (r, g, b, 255)
                     except Exception as e:
                         print(f"Error processing canvas '{canvas_name}': {e}")
+
+                rotated_img = img.transpose(Image.ROTATE_270)
+
                 output_path = output_directory / f"{canvas_name.replace(' ', '_').lower()}.png"
-                img.save(output_path)
+                rotated_img.save(output_path)
                 print(f"Saved image: {output_path}")
+
 
             print("Processing canvas data...")
             with ThreadPoolExecutor(max_workers=4) as executor:
@@ -2065,6 +2069,92 @@ class CanvasWorker(QObject):
 
         except Exception as e:
             print(f"Error generating images: {e}")
+
+
+
+class HoverButton(QPushButton):
+    def __init__(self, default_icon_path, hover_icon_path, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.default_icon = QIcon(default_icon_path)
+        self.hover_icon = QIcon(hover_icon_path)
+        self.setIcon(self.default_icon)
+        self.setStyleSheet("border: none; background: transparent;")
+        self.setFixedSize(72, 72)
+
+    def enterEvent(self, event):
+        self.setIcon(self.hover_icon)
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self.setIcon(self.default_icon)
+        super().leaveEvent(event)
+
+
+class CropLabel(QLabel):
+    crop_started = Signal(QPoint)
+    crop_updated = Signal(QPoint)
+    crop_finished = Signal(QPoint)
+    erase_pixel = Signal(QPoint)  # New signal for erasing
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.main_window = parent
+        self.setMouseTracking(True)
+        self.crop_rect = QRect()
+        self.is_drawing = False
+
+    def mousePressEvent(self, event):
+        if self.main_window.crop_mode and event.button() == Qt.LeftButton:
+            self.is_drawing = True
+            self.crop_rect.setTopLeft(event.position().toPoint())
+            self.crop_rect.setBottomRight(event.position().toPoint())
+            self.main_window.push_undo_stack()
+            self.crop_started.emit(event.position().toPoint())
+            self.update()
+        elif self.main_window.erase_mode and event.button() == Qt.LeftButton:
+            self.erase_pixel.emit(event.position().toPoint())
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self.main_window.crop_mode and self.is_drawing:
+            self.crop_rect.setBottomRight(event.position().toPoint())
+            self.crop_updated.emit(event.position().toPoint())
+            self.update()
+        elif self.main_window.erase_mode and event.buttons() & Qt.LeftButton:
+            self.erase_pixel.emit(event.position().toPoint())
+            self.update()  # Trigger repaint for eraser outline
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if self.main_window.crop_mode and event.button() == Qt.LeftButton and self.is_drawing:
+            self.is_drawing = False
+            self.crop_rect.setBottomRight(event.position().toPoint())
+            self.crop_finished.emit(event.position().toPoint())
+            self.update()
+        else:
+            super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.main_window.crop_mode and not self.crop_rect.isNull():
+            painter = QPainter(self)
+            pen = QPen(Qt.red, 2, Qt.DashLine)
+            painter.setPen(pen)
+            painter.drawRect(self.crop_rect.normalized())
+        elif self.main_window.erase_mode:
+            # Draw the eraser outline
+            cursor_pos = QCursor.pos()
+            widget_pos = self.mapFromGlobal(cursor_pos)
+            # Ensure the cursor is within the label
+            if self.rect().contains(widget_pos):
+                painter = QPainter(self)
+                pen = QPen(Qt.green, 1, Qt.SolidLine)
+                painter.setPen(pen)
+                painter.setBrush(Qt.NoBrush)
+                painter.drawEllipse(widget_pos, self.main_window.eraser_size, self.main_window.eraser_size)
+
 
 
 class ImageProcessingThread(threading.Thread):
@@ -2130,13 +2220,21 @@ class MainWindow(QMainWindow):
             "i ated purple chalk!",
             "made by ChatGBT in just 8 minutes",
             "Fuck my chungus life",
-            "Whaaatt? you dont have qhd???"
+            "Whaaatt? you dont have qhd???",
+            "hello everybody my name is welcome"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
         self.move_to_bottom_right()
         self._is_dragging = False
+        self.crop_mode = False
+        self.drag_enabled = True
+        self.temp_canvas_path = ""
         self._drag_position = QPoint()
+        self.erase_mode = False
+        self.eraser_size = 6 
+        self.original_image_path = ""
+        self.undo_stack = []
         # Initialize variables
         self.processing = False
         self.image_path = None
@@ -2183,7 +2281,7 @@ class MainWindow(QMainWindow):
         # Setup UI
         self.setup_ui()
         self.init_worker()
-        self.bring_to_front()
+        #self.bring_to_front()
 
     def init_worker(self):
         # Initialize worker and thread
@@ -2195,6 +2293,10 @@ class MainWindow(QMainWindow):
         self.start_process_canvas.connect(self.worker.process_canvas)
         self.worker.show_message.connect(self.show_floating_message)
         self.worker.images_finished.connect(self.on_images_finished)
+        
+        # Shortcut for Undo (Ctrl+Z)
+        undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
+        undo_shortcut.activated.connect(self.undo_action)
         
     def move_to_bottom_right(self):
         """
@@ -2219,25 +2321,7 @@ class MainWindow(QMainWindow):
         self.setWindowFlags(original_flags)
         self.show()
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            # Determine the widget under the cursor
-            child = self.childAt(event.position().toPoint())
-            # If no child widget is under the cursor or it's not an interactive widget, initiate dragging
-            if child is None or not isinstance(child, (QPushButton,)):
-                self._is_dragging = True
-                self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-                event.accept()
-            else:
-                self._is_dragging = False
-                
-    def mouseReleaseEvent(self, event):
-        self._is_dragging = False
 
-    def mouseMoveEvent(self, event):
-        if event.buttons() == Qt.LeftButton and self._is_dragging:
-            self.move(event.globalPosition().toPoint() - self._drag_position)
-            event.accept()
 
     def setup_ui(self):
         """
@@ -2386,7 +2470,7 @@ class MainWindow(QMainWindow):
 
         # Add the pin button
         self.always_on_top_checkbox = QCheckBox()
-        self.always_on_top_checkbox.setFixedSize(80, 80)  # Set size to 100x100
+        self.always_on_top_checkbox.setFixedSize(80, 80) 
         self.always_on_top_checkbox.setStyleSheet(f"""
             QCheckBox {{
                 background: transparent;
@@ -2512,7 +2596,7 @@ class MainWindow(QMainWindow):
         self.clip_button.clicked.connect(lambda: self.open_image_from_clipboard())
 
 
-        self.exit_button = QPushButton("Mod Info")
+        self.exit_button = QPushButton("Mod Guide")
         self.exit_button.setStyleSheet(button_stylesheet)
         self.exit_button.setMinimumSize(160, 60)
         #self.exit_button.clicked.connect(self.request_and_monitor_canvas)
@@ -2524,18 +2608,696 @@ class MainWindow(QMainWindow):
         # Add the button_container to the background_layout
         background_layout.addWidget(button_container, alignment=Qt.AlignCenter)
 
+
         # -------------------------
         # Add the background_container to the initial_layout
         # -------------------------
         initial_layout.addWidget(background_container, alignment=Qt.AlignCenter)
+
+        self.signature_label = QLabel("By PurplePuppy")
+
+        self.signature_label.setStyleSheet("""
+            color: #A45EE5;
+            font-size: 16px;
+            font-family: "Comic Sans MS", cursive, sans-serif;
+            font-weight: bold;
+        """)
+        self.signature_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
+        self.signature_label.setFixedSize(200, 20)  # Adjust width and height as needed
+        self.signature_label.setParent(self)
+
+# Set initial position for the signature label
+        padding_bottom = 20  # Adjust padding to avoid clipping
+        oscillation_amount = 5  # Subtle bounce (reduce from 10 to 5)
+
+        self.signature_label.move(10, self.height() - padding_bottom - self.signature_label.height())
+
+        self.signature_label.move(10, self.height() - padding_bottom - self.signature_label.height())
+
+        # Create a timer to toggle the label's position
+        self.toggle_timer = QTimer(self)
+        self.toggle_timer.timeout.connect(self.toggle_position)
+        self.toggle_timer.start(542)  # Switch every 500ms
+        
+        initial_layout.addWidget(self.signature_label)
 
                 # -------------------------
         # Add the initial widget to the stacked widget
         # -------------------------
         self.stacked_widget.addWidget(initial_widget)
 
+
+
+    def toggle_position(self):
+        """Toggle the position of the signature label."""
+        current_pos = self.signature_label.pos()
+        new_pos = QPoint(
+            current_pos.x(),
+            self.height() - 20 - self.signature_label.height() - (2 if current_pos.y() == self.height() - 20 - self.signature_label.height() else 0)
+        )
+        self.signature_label.move(new_pos)
+
     def open_website(self):
-        webbrowser.open("https://github.com/unpaid-intern/StampMod/")
+        webbrowser.open("https://github.com/unpaid-intern/StampMod/?tab=readme-ov-file#keybinds")
+
+
+    def setup_save_menu1(self):
+        """
+        Sets up Save Menu 1 with a 2x2 grid of images, each with a title above.
+        Includes a larger Home button with a hover SVG and no background.
+        """
+        # Create widget and layout for Save Menu 1
+        self.save_menu1_widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(20)
+
+        # Home button
+        home_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home_hover.svg")
+        )
+        home_button.setFixedSize(72, 72)
+        home_button.setIconSize(QSize(72, 72))
+        home_button.clicked.connect(self.go_to_initial_menu)
+        layout.addWidget(home_button, alignment=Qt.AlignLeft)
+        # Grid layout for images
+        grid_layout = QGridLayout()
+        grid_layout.setSpacing(10)
+
+        # Placeholder for images and their paths
+        self.image_labels = []
+        self.image_paths = []  # To be populated dynamically in update_save_menu1
+
+        canvas_names = ["Canvas 1", "Canvas 2", "Canvas 3", "Canvas 4"]
+        for idx, name in enumerate(canvas_names):
+            # Create a vertical container for each image and its title
+            container = QVBoxLayout()
+            container.setSpacing(5)
+            container.setAlignment(Qt.AlignCenter)
+
+            # Name label (title above the image)
+            name_label = QLabel(name)
+            name_label.setStyleSheet("""
+                font-size: 32px;
+                color: white;
+                text-align: center;
+                font-weight: bold;
+            """)
+            name_label.setAlignment(Qt.AlignCenter)
+            container.addWidget(name_label)
+
+            # Outer frame surrounding the image
+            frame = QFrame()
+            frame.setFixedSize(262, 262)  # Slightly larger than the image to accommodate the border
+            frame.setStyleSheet("""
+                QFrame {
+                    border: 3px solid #FFFFFF; /* Thicker border */
+                    background: transparent;
+                }
+            """)
+
+            # Image button inside the frame
+            image_label = QPushButton(frame)
+            image_label.setFixedSize(256, 256)  # Exact size of the image
+            image_label.setStyleSheet("""
+                QPushButton {
+                    border: none; /* No border for the image itself */
+                    background: transparent;
+                }
+            """)
+            frame_layout = QVBoxLayout(frame)  # Add layout to center the image in the frame
+            frame_layout.setContentsMargins(0, 0, 0, 0)  # No padding in the frame
+            frame_layout.addWidget(image_label, alignment=Qt.AlignCenter)
+            
+            container.addWidget(frame, alignment=Qt.AlignCenter)  # Add the frame to the container
+
+            self.image_labels.append(image_label)  # Keep references for updates
+
+            # Add the container to the grid layout
+            grid_layout.addLayout(container, idx // 2, idx % 2)  # Row and column positioning
+
+        layout.addLayout(grid_layout)
+
+        # Set layout and add to stacked widget
+        self.save_menu1_widget.setLayout(layout)
+        self.stacked_widget.addWidget(self.save_menu1_widget)
+
+
+
+    def update_save_menu1(self, directory_path):
+        """
+        Updates the Save Menu 1 with images from the specified directory.
+        Initializes the menu if it doesn't already exist and switches to it.
+        """
+        # Initialize menu if it doesn't exist
+        if not hasattr(self, 'save_menu1_widget'):
+            self.setup_save_menu1()
+        self.undo_stack.clear()
+        # Get PNG images from the directory
+        image_files = [f for f in os.listdir(directory_path) if f.endswith('.png')]
+        image_files = sorted(image_files)[:4]  # Limit to the first 4 images
+
+        if len(image_files) < 4:
+            self.show_floating_message("Not enough images in the directory", True)
+            return
+
+        # Update images and assign click functionality
+        for idx, (image_label, image_file) in enumerate(zip(self.image_labels, image_files)):
+            image_path = os.path.join(directory_path, image_file)
+            self.image_paths.append(image_path)
+
+            # Load and scale image to 256x256 using NEAREST neighbor
+            pixmap = QPixmap(image_path)
+            scaled_pixmap = pixmap.scaled(256, 256, Qt.KeepAspectRatio, Qt.FastTransformation)
+            image_label.setIcon(QIcon(scaled_pixmap))
+            image_label.setIconSize(QSize(256, 256))
+
+            try:
+                image_label.clicked.disconnect()  # Disconnect previous connections, if any
+            except:
+                pass
+            image_label.clicked.connect(lambda _, path=image_path: self.go_to_second_menu(path))
+
+        # Switch to Save Menu 1
+        self.stacked_widget.setCurrentWidget(self.save_menu1_widget)
+
+
+
+    def go_to_second_menu(self, path):
+        """
+        Navigates to Menu 2, displaying the image from the provided path.
+        """
+        # Check if the file exists
+        if not os.path.exists(path):
+            QMessageBox.critical(self, "Error", f"The file at {path} does not exist.")
+            return
+
+        # Load the image in Menu 2
+        if not hasattr(self, 'setup_menu2'):
+            QMessageBox.critical(self, "Error", "Menu 2 is not yet implemented.")
+            return
+
+        # Set up Menu 2 with the image path
+        self.setup_menu2(path)
+
+        # Switch to Menu 2
+        self.stacked_widget.setCurrentWidget(self.menu2_widget)
+
+    def setup_menu2(self, image_path):
+        """
+        Sets up Menu 2 for displaying and editing the selected image.
+        Includes rotate, erase, crop functionality, and save/reset buttons.
+        """
+        # Create widget and layout for Menu 2
+        self.temp_canvas_path = exe_path_fs("imagePawcessor/exe_data/temp/temp_canvas.png")
+        self.original_image_path = image_path
+        shutil.copy(image_path, self.temp_canvas_path)
+
+        self.menu2_widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(20)
+
+        # Home button using HoverButton
+        home_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home_hover.svg")
+        )
+        home_button.setFixedSize(80, 80)
+        home_button.setIconSize(QSize(80, 80))
+        home_button.clicked.connect(self.go_to_initial_menu)
+        layout.addWidget(home_button, alignment=Qt.AlignLeft)
+
+        # Horizontal layout for the image and tools
+        image_tools_layout = QHBoxLayout()
+
+        # Display the selected image
+        self.image_label_canvas = CropLabel(self)
+        self.image_label_canvas.setFixedSize(512, 512)
+        self.image_label_canvas.setStyleSheet("border: 1px solid #7b1fa2; background: #000000;")
+        pixmap = QPixmap(self.temp_canvas_path).scaled(
+            self.calculate_display_size(self.temp_canvas_path),
+            Qt.KeepAspectRatio,
+            Qt.FastTransformation
+        )
+        self.image_label_canvas.setPixmap(pixmap)
+        image_tools_layout.addWidget(self.image_label_canvas, alignment=Qt.AlignLeft)
+
+        # Connect CropLabel signals
+        self.image_label_canvas.crop_started.connect(self.on_crop_started)
+        self.image_label_canvas.crop_updated.connect(self.on_crop_updated)
+        self.image_label_canvas.crop_finished.connect(self.on_crop_finished)
+
+        # Column of tool buttons aligned to the right of the image
+        tools_layout = QVBoxLayout()
+        tools_layout.setContentsMargins(0, 0, 0, 0)
+        tools_layout.setSpacing(10)  # Increased spacing for better UI
+
+        # Add a spacer at the top
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Rotate Left Button
+        rotate_left_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_left.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_left_hover.svg")
+        )
+        rotate_left_button.setFixedSize(60, 60)
+        rotate_left_button.setIconSize(QSize(60, 60))
+        rotate_left_button.clicked.connect(lambda: self.rotate_image(90))
+        tools_layout.addWidget(rotate_left_button, alignment=Qt.AlignCenter)
+
+        # Spacer between Rotate Left and Rotate Right
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Rotate Right Button
+        rotate_right_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_right.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_right_hover.svg")
+        )
+        rotate_right_button.setFixedSize(60, 60)
+        rotate_right_button.setIconSize(QSize(60, 60))
+        rotate_right_button.clicked.connect(lambda: self.rotate_image(-90))
+        tools_layout.addWidget(rotate_right_button, alignment=Qt.AlignCenter)
+
+        # Spacer between Rotate Right and Crop Checkbox
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Crop Mode Checkbox with SVGs
+        self.crop_checkbox = QCheckBox()
+        self.crop_checkbox.setFixedSize(60, 60)
+        self.crop_checkbox.setStyleSheet(f"""
+            QCheckBox {{
+                background: transparent;
+                border: none;
+            }}
+            QCheckBox::indicator {{
+                width: 60px;
+                height: 60px;
+                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop.svg")});
+            }}
+            QCheckBox::indicator:checked {{
+                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop_on.svg")});
+            }}
+            QCheckBox::indicator:hover {{
+                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop_hover.svg")});
+            }}
+        """)
+        self.crop_checkbox.stateChanged.connect(self.toggle_crop_mode)
+        tools_layout.addWidget(self.crop_checkbox, alignment=Qt.AlignCenter)
+
+        # Spacer between Crop Checkbox and Erase Button
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Erase Button
+        eraser_size_label = QLabel("Eraser Size:")
+        eraser_size_label.setStyleSheet("color: white;")
+        tools_layout.addWidget(eraser_size_label, alignment=Qt.AlignCenter)
+
+        self.eraser_size_slider = QSlider(Qt.Horizontal)
+        self.eraser_size_slider.setMinimum(2)
+        self.eraser_size_slider.setMaximum(50)
+        self.eraser_size_slider.setValue(6)
+        self.eraser_size_slider.setTickPosition(QSlider.TicksBelow)
+        self.eraser_size_slider.setTickInterval(2)
+        self.eraser_size_slider.valueChanged.connect(self.update_eraser_size)
+        tools_layout.addWidget(self.eraser_size_slider, alignment=Qt.AlignCenter)
+
+        # Erase Button (Modify to toggle erase mode)
+        erase_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase_hover.svg")
+        )
+        erase_button.setFixedSize(60, 60)
+        erase_button.setIconSize(QSize(60, 60))
+        erase_button.setCheckable(True)
+        erase_button.clicked.connect(self.toggle_erase_mode)
+        tools_layout.addWidget(erase_button, alignment=Qt.AlignCenter)
+        # Spacer between Erase Button and Undo Button
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Undo Button
+        undo_button = HoverButton(
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo.svg"),
+            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo_hover.svg")
+        )
+        undo_button.setFixedSize(60, 60)
+        undo_button.setIconSize(QSize(60, 60))
+        undo_button.clicked.connect(self.undo_action)
+        tools_layout.addWidget(undo_button, alignment=Qt.AlignCenter)
+
+        # Add a spacer at the bottom
+        tools_layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Minimum, QSizePolicy.Expanding))
+
+        # Add the tools layout to the image-tools layout
+        image_tools_layout.addLayout(tools_layout)
+
+        # Add the image-tools layout to the main layout
+        layout.addLayout(image_tools_layout)
+
+        # Save and Reset Buttons
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(20)
+
+        save_button = QPushButton("Save!")
+        save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #7b1fa2;
+                color: white;
+                font-size: 20px;
+                font-weight: bold;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #9c27b0;
+            }
+        """)
+        save_button.clicked.connect(self.save_image)
+        buttons_layout.addWidget(save_button)
+
+        reset_button = QPushButton("Reset")
+        reset_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ba000d;
+                color: white;
+                font-size: 20px;
+                font-weight: bold;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        reset_button.clicked.connect(lambda: self.reset_image())
+        buttons_layout.addWidget(reset_button)
+        # Add buttons layout to main layout
+        layout.addLayout(buttons_layout)
+
+        # Set layout and add to stacked widget
+        self.menu2_widget.setLayout(layout)
+        self.stacked_widget.addWidget(self.menu2_widget)
+        # After connecting crop signals
+        self.image_label_canvas.erase_pixel.connect(self.handle_erase)
+
+
+    def update_eraser_size(self, value):
+        """
+        Updates the eraser size based on the slider value.
+        """
+        self.eraser_size = value
+        print(f"Eraser size set to: {self.eraser_size}")  # Debug statement
+
+
+    def toggle_erase_mode(self, checked):
+        """
+        Toggles the erase mode on or off based on the button state.
+        """
+        if checked:
+            self.erase_mode = True
+            self.crop_mode = False  # Disable crop mode if erase is activated
+            self.crop_checkbox.setChecked(False)
+            self.drag_enabled = False  # Disable window dragging during erase
+            self.image_label_canvas.setCursor(Qt.PointingHandCursor)
+            self.push_undo_stack()  # Save state for undo
+            print("Erase mode enabled")  # Debug statement
+        else:
+            self.erase_mode = False
+            self.drag_enabled = True  # Re-enable window dragging
+            self.image_label_canvas.setCursor(Qt.ArrowCursor)
+            print("Erase mode disabled")  # Debug statement
+
+    def calculate_display_size(self, image_path):
+        """
+        Calculate the display size to scale the image so that the largest dimension is 512 pixels.
+        """
+        try:
+            with Image.open(image_path) as img:
+                width, height = img.size
+                if width > height:
+                    return QSize(512, int((height / width) * 512))
+                else:
+                    return QSize(int((width / height) * 512), 512)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open image: {e}")
+            return QSize(512, 512)
+
+    def toggle_crop_mode(self, state):
+        """
+        Toggle crop mode on or off based on the checkbox state.
+        """
+        if state:
+            self.crop_mode = True
+            self.drag_enabled = False  # Disable window dragging during crop
+            self.image_label_canvas.setCursor(Qt.CrossCursor)
+            self.push_undo_stack()  # Save state for undo
+        else:
+            self.crop_mode = False
+            self.drag_enabled = True  # Re-enable window dragging
+            self.image_label_canvas.setCursor(Qt.ArrowCursor)
+
+    def on_crop_started(self, point):
+        """
+        Handle the start of cropping.
+        """
+        self.crop_start = point
+
+    def on_crop_updated(self, point):
+        """
+        Handle the update of cropping.
+        """
+        self.crop_end = point
+        self.image_label_canvas.crop_rect = QRect(self.crop_start, self.crop_end)
+        self.image_label_canvas.update()
+
+    def on_crop_finished(self, point):
+        """
+        Handle the completion of cropping.
+        """
+        self.crop_end = point
+        self.image_label_canvas.crop_rect = QRect(self.crop_start, self.crop_end)
+        self.image_label_canvas.update()
+        self.perform_crop()
+        self.crop_mode = False
+        self.crop_checkbox.setChecked(False)
+        self.drag_enabled = True
+        self.image_label_canvas.setCursor(Qt.ArrowCursor)
+        
+        # Clear the crop rectangle to remove artifacts
+        self.image_label_canvas.crop_rect = QRect()
+        self.image_label_canvas.update()
+
+    def perform_crop(self):
+        """
+        Crops the image based on the drawn rectangle and updates the display.
+        """
+        if not self.crop_start or not self.crop_end:
+            QMessageBox.warning(self, "Crop Error", "Invalid crop area.")
+            return
+
+        # Calculate the crop rectangle in the QLabel's coordinate system
+        x1, y1 = self.crop_start.x(), self.crop_start.y()
+        x2, y2 = self.crop_end.x(), self.crop_end.y()
+        crop_rect = QRect(QPoint(min(x1, x2), min(y1, y2)), QPoint(max(x1, x2), max(y1, y2)))
+
+        # Map the crop rectangle to the original image's coordinate system
+        label_size = self.image_label_canvas.size()
+        try:
+            with Image.open(self.temp_canvas_path) as img:
+                original_size = img.size  # Original image size (e.g., 200x200)
+                scale_x = original_size[0] / label_size.width()
+                scale_y = original_size[1] / label_size.height()
+
+                # Calculate the corresponding crop rectangle on the original image
+                original_crop_rect = QRect(
+                    int(crop_rect.x() * scale_x),
+                    int(crop_rect.y() * scale_y),
+                    int(crop_rect.width() * scale_x),
+                    int(crop_rect.height() * scale_y)
+                )
+
+                # Ensure the crop rectangle is within the image bounds
+                original_crop_rect = original_crop_rect.intersected(QRect(0, 0, original_size[0], original_size[1]))
+
+                if original_crop_rect.width() == 0 or original_crop_rect.height() == 0:
+                    QMessageBox.warning(self, "Crop Error", "Crop area is too small.")
+                    return
+
+                # Crop the image
+                cropped_img = img.crop((
+                    original_crop_rect.x(),
+                    original_crop_rect.y(),
+                    original_crop_rect.x() + original_crop_rect.width(),
+                    original_crop_rect.y() + original_crop_rect.height()
+                ))
+
+                # Remove fully transparent pixels
+                bbox = cropped_img.getbbox()
+                if bbox:
+                    cropped_img = cropped_img.crop(bbox)
+
+                # Save the cropped image back to temp_canvas_path without resizing
+                cropped_img.save(self.temp_canvas_path)
+
+                # Update the display
+                self.update_display(self.temp_canvas_path)
+
+        except FileNotFoundError:
+            QMessageBox.critical(self, "Error", f"The file at {self.temp_canvas_path} does not exist.")
+        except UnidentifiedImageError:
+            QMessageBox.critical(self, "Error", "Cannot identify the image file.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred during cropping: {e}")
+
+    def update_display(self, image_path):
+        """
+        Updates the QLabel to display the image at image_path, scaling the largest dimension to 512px.
+        """
+        pixmap = QPixmap(image_path)
+        display_size = self.calculate_display_size(image_path)
+        scaled_pixmap = pixmap.scaled(
+            display_size,
+            Qt.KeepAspectRatio,
+            Qt.FastTransformation
+        )
+        self.image_label_canvas.setPixmap(scaled_pixmap)
+        self.image_label_canvas.update()
+
+
+    def rotate_image(self, angle):
+        """
+        Rotates the image by the specified angle and updates the display while preserving aspect ratio.
+        """
+        try:
+            with Image.open(self.temp_canvas_path) as img:
+                # Rotate the image without resizing, allowing it to expand to fit the rotated image
+                rotated_img = img.rotate(angle, expand=True)
+                rotated_img.save(self.temp_canvas_path)
+            self.update_display(self.temp_canvas_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to rotate image: {e}")
+
+
+    def handle_erase(self, point):
+        """
+        Erases pixels in a circular area around the given point.
+        """
+        # Calculate the pixel position based on the QLabel's coordinate system
+        label_size = self.image_label_canvas.size()
+        try:
+            with Image.open(self.temp_canvas_path) as img:
+                img = img.convert("RGBA")
+                original_size = img.size
+                scale_x = original_size[0] / label_size.width()
+                scale_y = original_size[1] / label_size.height()
+
+                # Map the point to the original image coordinates
+                original_x = int(point.x() * scale_x)
+                original_y = int(point.y() * scale_y)
+
+                # Define the eraser radius
+                radius = self.eraser_size
+
+                # Iterate over the pixels within the eraser circle
+                for x in range(original_x - radius, original_x + radius + 1):
+                    for y in range(original_y - radius, original_y + radius + 1):
+                        if 0 <= x < original_size[0] and 0 <= y < original_size[1]:
+                            if (x - original_x) ** 2 + (y - original_y) ** 2 <= radius ** 2:
+                                img.putpixel((x, y), (0, 0, 0, 0))  # Make pixel fully transparent
+
+                img.save(self.temp_canvas_path)
+
+            # Update the display
+            self.update_display(self.temp_canvas_path)
+
+        except FileNotFoundError:
+            QMessageBox.critical(self, "Error", f"The file at {self.temp_canvas_path} does not exist.")
+        except UnidentifiedImageError:
+            QMessageBox.critical(self, "Error", "Cannot identify the image file.")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"An error occurred during erasing: {e}")
+
+
+    def save_image(self):
+        """
+        Saves the modified image to a user-specified location.
+        """
+        save_path, _ = QFileDialog.getSaveFileName(self, "Save Image", "", "PNG Files (*.png);;All Files (*)")
+        if save_path:
+            try:
+                shutil.copy(self.temp_canvas_path, save_path)
+                QMessageBox.information(self, "Saved", f"Image saved to {save_path}.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to save image: {e}")
+
+    def reset_image(self):
+        """
+        Resets temp_canvas.png to the original image and updates the display.
+        """
+        try:
+            shutil.copy(self.original_image_path, self.temp_canvas_path)
+            self.update_display(self.temp_canvas_path)
+            QMessageBox.information(self, "Reset", "Image has been reset to original.")
+            self.undo_stack.clear()  # Clear undo history on reset
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to reset image: {e}")
+
+    def push_undo_stack(self):
+        """
+        Pushes the current state of the image onto the undo stack.
+        """
+        try:
+            with Image.open(self.temp_canvas_path) as img:
+                self.undo_stack.append(img.copy())
+                # Limit the undo stack size if necessary
+                if len(self.undo_stack) > 20:
+                    self.undo_stack.pop(0)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to push to undo stack: {e}")
+
+    def undo_action(self):
+        """
+        Undoes the last action.
+        """
+        if not self.undo_stack:
+            QMessageBox.information(self, "Undo", "Nothing to undo.")
+            return
+        try:
+            last_img = self.undo_stack.pop()
+            last_img.save(self.temp_canvas_path)
+            self.update_display(self.temp_canvas_path)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to undo action: {e}")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.drag_enabled:
+            child = self.childAt(event.position().toPoint())
+            if child is None or not isinstance(child, (QPushButton, QCheckBox)):
+                self._is_dragging = True
+                self._drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+                event.accept()
+            else:
+                self._is_dragging = False
+        else:
+            super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._is_dragging and self.drag_enabled:
+            self.move(event.globalPosition().toPoint() - self._drag_position)
+            event.accept()
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._is_dragging = False
+        super().mouseReleaseEvent(event)
+
+
+
 
     def request_and_monitor_canvas(self):
         """
@@ -2576,6 +3338,7 @@ class MainWindow(QMainWindow):
         self.processing = False
         if success:
             print("Image generation completed successfully!")
+        self.update_save_menu1(exe_path_fs("game_data/game_canvises"))
 
 
 
@@ -3311,7 +4074,6 @@ class MainWindow(QMainWindow):
         result_layout.addWidget(button_container)
         # Add result widget to stacked widget
         self.stacked_widget.addWidget(self.result_widget)
-        self.bring_to_front
 
 
     def setup_save_menu(self):
@@ -4350,9 +5112,9 @@ class MainWindow(QMainWindow):
                 self.processing_method_changed("Color Match")
 
         else:
-            if "Color Match" in [method["name"] for method in self.processing_methods]:
-                self.processing_combobox.setCurrentText("Color Match")
-                self.processing_method_changed("Color Match")
+            if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
+                self.processing_combobox.setCurrentText("Pattern Dither")
+                self.processing_method_changed("Pattern Dither")
 
         self.preprocess_checkbox.setChecked(True)
         self.lab_color_checkbox.setChecked(True)
@@ -4584,9 +5346,9 @@ class MainWindow(QMainWindow):
                     self.processing_method_changed("Color Match")
 
             else:
-                if "Color Match" in [method["name"] for method in self.processing_methods]:
-                    self.processing_combobox.setCurrentText("Color Match")
-                    self.processing_method_changed("Color Match")
+                if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
+                    self.processing_combobox.setCurrentText("Pattern Dither")
+                    self.processing_method_changed("Pattern Dither")
 
             for color_number in self.boost_labels:
                 self.boost_labels[color_number].setVisible(True)
@@ -5374,12 +6136,14 @@ class MainWindow(QMainWindow):
         # Step 3: Load or initialize saved_stamps.json
         appdata_dir.mkdir(parents=True, exist_ok=True)  # Ensure GUI directory exists
         if not saved_stamps_json.exists():
+            initialize_saved()
             saved_stamps = {}
         else:
             try:
                 with open(saved_stamps_json, 'r') as f:
                     saved_stamps = json.load(f)
             except Exception:
+                initialize_saved()
                 saved_stamps = {}
 
         # Step 4: Check if hash already exists
