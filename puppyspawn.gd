@@ -400,12 +400,47 @@ func check_image_resolution(file_path, pos):
 						else:
 							pos.y -= 0.9955
 						ogaboga = true
-						
+				elif Input.is_key_pressed(KEY_SHIFT):
+					pos = _Player.global_transform.origin
+					if ray_detector:
+						var ray_position = pos + Vector3(0, 20, 0)
+						ray_detector.detect_collision_at(ray_position)
+						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+						ray_detector.detect_collision_at(ray_position)
+						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+						ray_detector.detect_collision_at(ray_position)
+						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+						ray_detector.detect_collision_at(ray_position)
+						var ground_y = ray_detector.get_ground_y()
+						if ground_y != null:
+							pos.y = ground_y
+						else:
+							pos.y -= 0.9955
+						ogaboga = true
+				elif Input.is_key_pressed(KEY_1):
+					pos = Vector3(48.571999, 0, -51.041)
+					PlayerData._send_notification("Spawning at canvas 1!", 0)
+					ogaboga = true
+				elif Input.is_key_pressed(KEY_2):
+					pos = Vector3(69.571999, 0, -54.952999)
+					PlayerData._send_notification("Spawning at canvas 2!", 0)
+					ogaboga = true
+				elif Input.is_key_pressed(KEY_3):
+					pos = Vector3(-54.7896, 0, -115.719002)
+					PlayerData._send_notification("Spawning at canvas 3!", 0)
+					ogaboga = true
+				elif Input.is_key_pressed(KEY_4):
+					pos = Vector3(-25.781099, 0, -34.5681)
+					PlayerData._send_notification("Spawning at canvas 4!", 0)
+					ogaboga = true
 				else:
 					if Input.is_key_pressed(KEY_CONTROL):
 						isgif = new_isgif
 						pos = Vector3(154+(imgy / 2), -0.3, 1.4)
 						dir = "left"
+						PlayerData._send_notification("Spawning at dock!", 0)
+						_delete()
+						yield(get_tree().create_timer(0.4), "timeout")
 						if imgx <= 20 and imgy <= 20:
 							origin = pos
 							four = false
