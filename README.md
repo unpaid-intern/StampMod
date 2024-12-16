@@ -21,7 +21,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 
 # Keybinds
-> **Keybinds are fully customizable using the game's built in controls settings with BlueberryWolfiAPIs**
+> **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
 - **`F9` Key**  
   - Opens my stamp menu executable.
@@ -109,8 +109,9 @@ If you wish to know the location of a specific canvas, please refer to the below
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
 2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip)
 3. Extract to `PurplePuppy-Stamps` and be careful to **not rename it**.
-4. **Optionally** download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract to `BlueberryWolfi.APIs`
-5. Place folder(s) in `WEBFISHING/GDWeave/Mods/`
+4. Download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) and extract to `BlueberryWolfi.APIs`
+5. Place folders in `WEBFISHING/GDWeave/Mods/`
 
 ## Requires:
 - [GDWeave](https://github.com/NotNite/GDWeave/tree/main)
+- [BlueberryWolfi.APIs](https://github.com/BlueberryWolf/APIs)
