@@ -27,3 +27,4 @@ got ctrl z to function and changed keybinds
 - improved preprocessing logic
 - improved ctrl z logic
 - more stamps off-canvas
+- antivirus?? is a problem?

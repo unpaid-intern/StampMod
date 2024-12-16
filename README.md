@@ -22,7 +22,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 
 ## General Information
-- **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Scanner, SecureAge, VirIT, or Zillya antivirus (no it's **not a virus** lol)
+- **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Scanner, SecureAge, VirIT, Skyhigh (SWG), or Zillya antivirus (no it's **not a virus** lol)
 - The stamps menu might take a moment to launch the first time
 - You can **paste images** into the menu directly or **select a file**
 - Images are automatically adjusted to be **upright relative to the player camera**

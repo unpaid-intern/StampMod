@@ -100,14 +100,13 @@ def launch_process(launch_cmd):
         if platform.system() == 'Windows':
 
 
-            with open("launch_log.txt", "w") as log_file:
-                proc = subprocess.Popen(
-                    launch_cmd,
-                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                    stdout=log_file,
-                    stderr=log_file
-                )
-                
+            proc = subprocess.Popen(
+                launch_cmd,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
         else:
             # For Linux/MacOS, use os.setsid to detach and redirect output
             proc = subprocess.Popen(
@@ -141,9 +140,11 @@ def main():
     # Correctly resolve script/executable paths
     if getattr(sys, 'frozen', False):
         # If frozen, use the _MEIPASS attribute to find bundled resources
-        base_path = Path(sys._MEIPASS)
+        base_path = Path(sys.executable).parent
     else:
         base_path = Path(__file__).parent
+    
+    base_path = base_path.parent
 
     image_pawcess_exe = base_path / 'imagePawcessor' / 'imagePawcess.exe'
     image_pawcess_script = base_path / 'imagePawcessorScript' / 'imagePawcess.py'
@@ -158,7 +159,7 @@ def main():
         print("Neither executable nor script found. Check the paths!")
         sys.exit(1)
 
-
+    #works fine but cant find anything when exe "Neither executable nor script found. Check the paths!")
     # Launch executable or script
     if image_pawcess_exe.exists():
         launch_cmd = [str(image_pawcess_exe)]
