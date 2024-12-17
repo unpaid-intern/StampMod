@@ -7,6 +7,8 @@ import json
 import time
 import math
 from pathlib import Path
+import socket
+from filelock import FileLock, Timeout
 from concurrent.futures import ThreadPoolExecutor
 import webbrowser
 import cv2 
@@ -32,52 +34,23 @@ from PySide6.QtCore import (
 )
 
 
-"""
-current_dir = os.getcwd()
-log_file_path = os.path.join(current_dir, 'menu.log')
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file_path, mode='w'),
-        logging.StreamHandler(sys.stdout),
-    ]
-)
-
-class LoggerWriter:
-    def __init__(self, level):
-        self.level = level
-
-    def write(self, message):
-        if message.strip():
-            self.level(message.strip())
-
-    def flush(self):
-        for handler in logging.root.handlers:
-            handler.flush()
-
-sys.stdout = LoggerWriter(logging.info)
-sys.stderr = LoggerWriter(logging.error)
-"""
-
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
-        # If the application is frozen, use the executable's directory
+
         base_path = Path(sys.executable).parent
     else:
-        # If not frozen, use the script's directory
+
         base_path = Path(__file__).parent
 
-    # Trim just the current script directory
+
     return base_path.parent
 
 def exe_path_fs(relative_path: str) -> Path:
     base_path = get_base_path()
     return (base_path / relative_path).resolve()
 
-def exe_path_stylesheet(relative_path: str) -> str:
-    # For Qt stylesheets, we need forward slashes
+def exe_path_str(relative_path: str) -> str:
+
     return exe_path_fs(relative_path).as_posix()
 
 def get_appdata_dir() -> Path:
@@ -89,7 +62,7 @@ def get_appdata_dir() -> Path:
     """
     if os.name == "nt":  # Windows
         appdata_base = Path(os.getenv("LOCALAPPDATA"))
-    else:  # Linux/macOS
+    else:
         appdata_base = Path.home() / ".local" / "share"
     
     appdata_dir = appdata_base / "webfishing_stamps_mod"
@@ -125,10 +98,12 @@ def get_config_path() -> Path:
 
     return config_file
 
+IPC_HOST = '127.0.0.1'
+IPC_PORT = 65432
+LOCK_FILE = Path(tempfile.gettempdir()) / 'imagePawcessor.lock'
+LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+app_lock = None
 
-
-
-# Create a registry dictionary
 processing_method_registry = {}
 use_lab = False
 first = False
@@ -637,13 +612,14 @@ def simple_k_means_palette_mapping(img, color_key, params):
         clusters = 24
 
     # Use threading backend with joblib to prevent CMD windows
-    with parallel_backend('threading'):
+    with parallel_backend('threading', n_jobs=1):
         kmeans = KMeans(
             n_clusters=clusters,
             init="k-means++",
             n_init=10,
             random_state=0
         ).fit(data_flat)
+
 
     cluster_centers = kmeans.cluster_centers_
     labels = kmeans.labels_
@@ -1059,7 +1035,7 @@ def find_closest_colors_image(image_array, color_key):
 
     H, W = rgb_data.shape[:2]
 
-    color_nums = list(color_key.keys())
+
     color_values_rgb = np.array(list(color_key.values()), dtype=np.uint8)
 
     if use_lab:
@@ -1975,6 +1951,7 @@ class CanvasWorker(QObject):
             except Exception as e:
                 print(f"Failed to update JSON: {e}")
                 print("Failed to update JSON")
+                create_default_config()
                 return
             # Step 2: Monitor JSON status
             timeout = time.time() + 4  # 4-second timeout
@@ -2006,10 +1983,13 @@ class CanvasWorker(QObject):
 
                 except json.JSONDecodeError as json_error:
                     print(f"JSON parsing error: {json_error}")
+                    create_default_config()
                 except FileNotFoundError as file_error:
                     print(f"File not found: {file_error}")
+                    create_default_config()
                 except Exception as e:
                     print(f"Unexpected error reading JSON: {e}")
+                    create_default_config()
 
             # Handle success or failure after the loop
             if not success:
@@ -2200,8 +2180,12 @@ class ImageProcessingThread(threading.Thread):
 
 class MainWindow(QMainWindow):
     start_process_canvas = Signal(str, str)
+    bringfront = Signal()
     def __init__(self):
         super().__init__()
+
+        self.bringfront.connect(self.bring_to_front)
+
         self.back_button = None
         self._is_dragging = False
         self._drag_position = QPoint()
@@ -2292,6 +2276,7 @@ class MainWindow(QMainWindow):
         self.init_worker()
         self.bring_to_front()
 
+
     def mousePressEvent(self, event):
         if (
             event.button() == Qt.LeftButton
@@ -2372,23 +2357,23 @@ class MainWindow(QMainWindow):
         # Find the screen at the window's center position
         return QApplication.screenAt(window_pos)
 
-
+    @Slot()
     def bring_to_front(self):
         """Brings the window to the front without disabling the close button."""
         # Ensure the window is visible
         self.show()
-        
-        # Activate and raise the window
         self.activateWindow()
         self.raise_()
-        
-        # Temporarily set the WindowStaysOnTopHint flag
-        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
-        self.show()  # Re-apply the flag to enforce the change
-        
-        # Use QTimer to remove the flag after a short delay to minimize flicker
-        QTimer.singleShot(100, lambda: (self.setWindowFlag(Qt.WindowStaysOnTopHint, False), self.show()))
 
+        # Get the current window flags
+        current_flags = self.windowFlags()
+        
+        # Temporarily add WindowStaysOnTopHint without calling show()
+        self.setWindowFlags(current_flags | Qt.WindowStaysOnTopHint)
+        self.show()  # This enforces the "always on top" effect
+        
+        # Use QTimer to restore the original flags after a short delay
+        QTimer.singleShot(100, lambda: self.setWindowFlags(current_flags) or self.show())
 
 
     def setup_ui(self):
@@ -2547,13 +2532,13 @@ class MainWindow(QMainWindow):
             QCheckBox::indicator {{
                 width: 80px;
                 height: 80px;
-                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/tack.svg")});
+                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/tack.svg")});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/tack_down.svg")});
+                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/tack_down.svg")});
             }}
             QCheckBox::indicator:hover {{
-                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/tack_hover.svg")});
+                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/tack_hover.svg")});
             }}
         """)
         self.always_on_top_checkbox.setChecked(False)
@@ -2742,8 +2727,8 @@ class MainWindow(QMainWindow):
 
         # Home button
         home_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home_hover.svg")
+            exe_path_str("imagePawcessor/exe_data/font_stuff/home.svg"),
+            exe_path_str("imagePawcessor/exe_data/font_stuff/home_hover.svg")
         )
         home_button.setFixedSize(72, 72)
         home_button.setIconSize(QSize(72, 72))
@@ -2889,8 +2874,8 @@ class MainWindow(QMainWindow):
 
         # Home button using HoverButton
         home_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home_hover.svg")
+            exe_path_str("imagePawcessor/exe_data/font_stuff/home.svg"),
+            exe_path_str("imagePawcessor/exe_data/font_stuff/home_hover.svg")
         )
         home_button.setFixedSize(80, 80)
         home_button.setIconSize(QSize(80, 80))
@@ -2938,8 +2923,8 @@ class MainWindow(QMainWindow):
 
         # Undo Button
         undo_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/undo_hover.svg")
+            exe_path_str("imagePawcessor/exe_data/font_stuff/undo.svg"),
+            exe_path_str("imagePawcessor/exe_data/font_stuff/undo_hover.svg")
         )
         undo_button.setFixedSize(80,80)
         undo_button.setIconSize(QSize(80,80))
@@ -2951,8 +2936,8 @@ class MainWindow(QMainWindow):
 
         # Rotate Left Button
         rotate_left_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_left.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_left_hover.svg")
+            exe_path_str("imagePawcessor/exe_data/font_stuff/rotate_left.svg"),
+            exe_path_str("imagePawcessor/exe_data/font_stuff/rotate_left_hover.svg")
         )
         rotate_left_button.setFixedSize(80,80)
         rotate_left_button.setIconSize(QSize(80,80))
@@ -2964,8 +2949,8 @@ class MainWindow(QMainWindow):
 
         # Rotate Right Button
         rotate_right_button = HoverButton(
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_right.svg"),
-            exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rotate_right_hover.svg")
+            exe_path_str("imagePawcessor/exe_data/font_stuff/rotate_right.svg"),
+            exe_path_str("imagePawcessor/exe_data/font_stuff/rotate_right_hover.svg")
         )
         rotate_right_button.setFixedSize(80,80)
         rotate_right_button.setIconSize(QSize(80,80))
@@ -2986,13 +2971,13 @@ class MainWindow(QMainWindow):
             QCheckBox::indicator {{
                 width: 80px;
                 height: 80px;
-                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop.svg")});
+                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/crop.svg")});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop_on.svg")});
+                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/crop_on.svg")});
             }}
             QCheckBox::indicator:hover {{
-                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/crop_hover.svg")});
+                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/crop_hover.svg")});
             }}
         """)
         self.crop_checkbox.stateChanged.connect(self.toggle_crop_mode)
@@ -3011,13 +2996,13 @@ class MainWindow(QMainWindow):
 #            QCheckBox::indicator {{
 #                width: 60px;
 #                height: 60px;
-#                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase.svg")});
+#                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/erase.svg")});
 #            }}
 #            QCheckBox::indicator:checked {{
-#                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase_on.svg")});
+#                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/erase_on.svg")});
 #            }}
 #            QCheckBox::indicator:hover {{
-#                image: url({exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/erase_hover.svg")});
+#                image: url({exe_path_str("imagePawcessor/exe_data/font_stuff/erase_hover.svg")});
 #            }}
         """)
         self.erase_checkbox.stateChanged.connect(self.toggle_erase_mode)
@@ -3679,7 +3664,7 @@ class MainWindow(QMainWindow):
         """
         self.reset_movie()
         # 1. Gather images from menu_pics_dir
-        menu_pics_dir = exe_path_stylesheet("imagePawcessor/exe_data/menu_pics")
+        menu_pics_dir = exe_path_str("imagePawcessor/exe_data/menu_pics")
         if not os.path.exists(menu_pics_dir):
             QMessageBox.warning(self, "Error", f"Menu pictures directory not found: {menu_pics_dir}")
             return
@@ -3903,13 +3888,13 @@ class MainWindow(QMainWindow):
             QPushButton {{
                 border: none; 
                 background-color: transparent;
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/home.svg')});
             }}
             QPushButton:hover {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home_hover.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/home_hover.svg')});
             }}    
             QPushButton:pressed {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home_hover.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/home_hover.svg')});
             }}
         """)
 
@@ -3926,13 +3911,13 @@ class MainWindow(QMainWindow):
             QPushButton {{
                 border: none; /* Remove any borders */
                 background-color: transparent; 
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/refresh.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/refresh.svg')});
             }}
             QPushButton:hover {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/refresh_hover.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/refresh_hover.svg')});
             }}    
             QPushButton:pressed {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/refresh_hover.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/refresh_hover.svg')});
             }}       
         """)
         self.refresh_button.setFixedSize(60, 60)  # Ensure consistent size
@@ -3995,10 +3980,10 @@ class MainWindow(QMainWindow):
                 height: 24px;
             }}
             QCheckBox::indicator:unchecked {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/check.svg')});
             }}
         """)
         ring_layout.addWidget(self.preprocess_checkbox)
@@ -4018,10 +4003,10 @@ class MainWindow(QMainWindow):
                 height: 24px;
             }}
             QCheckBox::indicator:unchecked {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/check.svg')});
             }}
         """)
         ring_layout.addWidget(self.bg_removal_checkbox)
@@ -4041,10 +4026,10 @@ class MainWindow(QMainWindow):
                 height: 24px;
             }}
             QCheckBox::indicator:unchecked {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/uncheck.svg')});
             }}
             QCheckBox::indicator:checked {{
-                image: url({exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')});
+                image: url({exe_path_str('imagePawcessor/exe_data/font_stuff/check.svg')});
             }}
         """)
         ring_layout.addWidget(self.lab_color_checkbox)
@@ -4374,23 +4359,23 @@ class MainWindow(QMainWindow):
         # Add Buttons
         buttons = [
             {
-                "normal": exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/home.svg'),
-                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/home_hover.svg"),
+                "normal": exe_path_str('imagePawcessor/exe_data/font_stuff/home.svg'),
+                "hover": exe_path_str("imagePawcessor/exe_data/font_stuff/home_hover.svg"),
                 "action": self.go_to_initial_menu,
             },
             {
-                "normal": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/save.svg"),
-                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/save_hover.svg"),
+                "normal": exe_path_str("imagePawcessor/exe_data/font_stuff/save.svg"),
+                "hover": exe_path_str("imagePawcessor/exe_data/font_stuff/save_hover.svg"),
                 "action": lambda: self.save_current(True),
             },
             {
-                "normal": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rand.svg"),
-                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/rand_hover.svg"),
+                "normal": exe_path_str("imagePawcessor/exe_data/font_stuff/rand.svg"),
+                "hover": exe_path_str("imagePawcessor/exe_data/font_stuff/rand_hover.svg"),
                 "action": self.randomize_saved_stamps,
             },
             {
-                "normal": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/delete.svg"),
-                "hover": exe_path_stylesheet("imagePawcessor/exe_data/font_stuff/delete_hover.svg"),
+                "normal": exe_path_str("imagePawcessor/exe_data/font_stuff/delete.svg"),
+                "hover": exe_path_str("imagePawcessor/exe_data/font_stuff/delete_hover.svg"),
                 "action": lambda: self.toggle_delete_mode(True),
             },
         ]
@@ -4907,12 +4892,12 @@ class MainWindow(QMainWindow):
 
             # Dynamically set icons based on text color
             if text_color == "white":
-                unchecked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck_white.svg')
-                checked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check_white.svg')
+                unchecked_icon = exe_path_str('imagePawcessor/exe_data/font_stuff/uncheck_white.svg')
+                checked_icon = exe_path_str('imagePawcessor/exe_data/font_stuff/check_white.svg')
                 border_color = "#ffffff"  # White border for light text
             else:
-                unchecked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/uncheck.svg')
-                checked_icon = exe_path_stylesheet('imagePawcessor/exe_data/font_stuff/check.svg')
+                unchecked_icon = exe_path_str('imagePawcessor/exe_data/font_stuff/uncheck.svg')
+                checked_icon = exe_path_str('imagePawcessor/exe_data/font_stuff/check.svg')
                 border_color = "#e3a8e6"
 
             # Store the border color
@@ -6564,7 +6549,6 @@ def initialize_saved():
     print(f"Initialized saved stamps directory in: {appdata_dir}")
 
 
-
 def cleanup_saved_stamps():
     """
     Validate and clean up the saved stamps directory and associated JSON file.
@@ -6671,11 +6655,110 @@ def cleanup_saved_stamps():
     print("\nRemoved Folders:")
     print(removed_folders if removed_folders else "No folders removed.")
 
-def update_pid_in_config():
+
+def create_default_config():
     """
-    Update the 'pid' key in the JSON file with the current process's PID.
-    If the JSON file does not exist, create it with default values.
+    Create a default JSON configuration file at the given path.
     """
+    config_path = get_config_path()
+    
+    default_config_data = {
+        "open_menu": 16777247,
+        "spawn_stamp": 61,
+        "ctrl_z": 16777220,
+        "toggle_playback": 45,
+        "gif_ready": False,
+        "walky_talky_webfish": "nothing new!",
+        "walky_talky_menu": "nothing new!"
+    }
+
+    # Write the default configuration to the file
+    try:
+        with open(config_path, 'w') as file:
+            json.dump(default_config_data, file, indent=4)
+        print(f"Default configuration file created at {config_path}")
+    except Exception as e:
+        print(f"Failed to create config file: {e}")
+        sys.exit(1)
+
+
+def ipc_server():
+    """
+    IPC server that listens for incoming messages to bring the main process's window to front.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind((IPC_HOST, IPC_PORT))
+        except OSError as e:
+            print(f"Failed to bind IPC server on {IPC_HOST}:{IPC_PORT}: {e}")
+            sys.exit(1)
+        s.listen()
+        print(f"IPC Server listening on {IPC_HOST}:{IPC_PORT}")
+        while True:
+            try:
+                conn, addr = s.accept()
+                with conn:
+                    data = conn.recv(1024)
+                    if not data:
+                        continue
+                    message = data.decode().strip()
+                    print(f"Received message: '{message}' from {addr}")
+                    if message == 'BRING_TO_FRONT':
+                        print("Request to bring window to front received.")
+                        window.bringfront.emit()
+                    elif message == 'EXIT':
+                        print("Exit command received. Shutting down IPC server.")
+                        sys.exit(0)
+                    else:
+                        print(f"Unknown message received: '{message}'")
+            except Exception as e:
+                print(f"Error in IPC server: {e}")
+
+
+def startup():
+    global app_lock
+
+    if LOCK_FILE.is_dir():
+        print(f"Lock file path {LOCK_FILE} is a directory. Please delete it and try again.")
+        sys.exit(1)
+
+    app_lock = FileLock(str(LOCK_FILE))
+    try:
+        app_lock.acquire(timeout=0)
+        print("No existing instance detected. Running as the main instance.")
+
+    except Timeout:
+        print("Another instance is already running. Checking if it's still active.")
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((IPC_HOST, IPC_PORT))
+                s.sendall(b'BRING_TO_FRONT')
+            print("Request sent to bring the existing instance to front. Exiting.")
+            sys.exit(0)
+        except FileNotFoundError:
+            print(f"Lock file {LOCK_FILE} does not exist, but could not acquire lock.")
+            sys.exit(1)
+        except ValueError:
+            print(f"Invalid PID found in lock file {LOCK_FILE}. Removing and retrying.")
+            LOCK_FILE.unlink()
+            try:
+                app_lock.acquire(timeout=0)
+                print("Acquired lock after removing invalid lock file. Running as the main instance.")
+                with open(LOCK_FILE, 'w') as f:
+                    f.write(str(os.getpid()))
+            except Exception as e:
+                print(f"Failed to acquire lock after removing invalid lock file: {e}")
+                sys.exit(1)
+        except Exception as e:
+            print(f"An error occurred while handling the lock: {e}")
+            sys.exit(1)
+
+
+    
+
+    server_thread = threading.Thread(target=ipc_server, daemon=True)
+    server_thread.start()
+
     config_path = get_config_path()
 
     # Check if the config file exists, create it if it doesn't
@@ -6683,60 +6766,17 @@ def update_pid_in_config():
         print("Config file not found. Creating default configuration...")
         create_default_config(config_path)
 
-    # Load the current JSON data
-    with open(config_path, 'r') as file:
-        config_data = json.load(file)
-
-    # Update the 'pid' key
-    config_data['pid'] = os.getpid()
-
-    # Save the updated JSON back to the file
-    with open(config_path, 'w') as file:
-        json.dump(config_data, file, indent=4)
-
-    print(f"Updated 'pid' to {os.getpid()} in {config_path}")
-
-
-def create_default_config(config_path: Path):
-    """
-    Create a default JSON configuration file at the given path.
-    """
-    default_config_data = {
-        "open_menu": 16777247,
-        "spawn_stamp": 61,
-        "ctrl_z": 16777220,
-        "toggle_playback": 45,
-        "gif_ready": False,
-        "pid": -1,
-        "walky_talky_webfish": "nothing new!",
-        "walky_talky_menu": "nothing new!"
-    }
-
-    # Write the default configuration to the file
-    with open(config_path, 'w') as file:
-        json.dump(default_config_data, file, indent=4)
-
-    print(f"Default configuration file created at {config_path}")
-
-
 if __name__ == '__main__':
-    update_pid_in_config()
+    startup()
+
     app = QApplication(sys.argv)
-    """
-    print("Starting script.")
-    try:
-        raise ValueError("This is a test exception.")
-    except Exception as e:
-        logging.exception("An exception occurred.")
-    print("Script continues.")
-    # Set the Application User Model ID for Windows taskbar (prevents grouping issues)
-    """
+
     if sys.platform.startswith('win'):
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(u"ImageProcessingGUI")
 
     # Define the icon path and apply the icon
-    icon_path = exe_path_stylesheet("imagePawcessor/exe_data/icon.png")
+    icon_path = exe_path_str("imagePawcessor/exe_data/icon.png")
 
     app_icon = None
     if os.path.exists(icon_path):
@@ -6745,7 +6785,6 @@ if __name__ == '__main__':
     else:
         print("Warning: icon.png not found in directory.")
 
-    # Create and show the main window
     window = MainWindow()
     if app_icon:
         window.setWindowIcon(app_icon)  # Ensure the window gets the icon

@@ -5,12 +5,13 @@
 !imagePawcessor/
 !imagePawcessor/imagePawcess.py
 !imagePawcessor/imagePawcessSetup.py
-!imagePawcessor/imagepawcess.ico
+!imagePawcessor/app_icon.ico
 !imagePawcessor/launcher.py
 !imagePawcessor/launcherSetup.py
 !imagePawcessor/launcher.ico
 !imagePawcessor/exe_data
 !imagePawcessor/requirements.txt
+!imagePawcessor/imagePawcess.lock
 !puppyspawn.gd
 !main.gd
 !CHANGELOG.md

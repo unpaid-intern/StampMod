@@ -26,10 +26,11 @@ got ctrl z to function and changed keybinds
 - using... gentler compression??? because thunderstore SUCKS. and made launching it less hard to mess up
 # 2.0.2 
 - i cant stop messing up. better dock handling system, changed default keybind and readme. more menu art
+- fixed antivirus and better laucnh handling
+- better gif handling
 > future updates:
 - linux version
 - improved preprocessing logic
 - improved ctrl z logic
 - more stamps off-canvas
-- antivirus?? is a problem?
 - add an eraser (i quit)

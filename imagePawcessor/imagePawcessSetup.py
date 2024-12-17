@@ -1,8 +1,6 @@
-# setup.py
-
 import sys
-import os
 from cx_Freeze import setup, Executable
+
 
 build_exe_options = {
     "packages": [
@@ -15,29 +13,38 @@ build_exe_options = {
         "time",
         "math",
         "pathlib",
+        "socket",
+        "filelock",
         "concurrent.futures",
         "webbrowser",
         "cv2",
         "PIL",
         "numpy",
-        "logging",
         "shutil",
         "sklearn",
         "joblib",
         "PySide6",
+        "onnxruntime",
+    ],
+    "includes": [
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "html",
     ],
     "include_files": [
-        "imagePawcess.ico",
-        "assets/",
     ],
     "include_msvcr": True,
     "excludes": [
+        "tkinter",
+        "email",
+        "http",
+        "xml",
     ],
     "optimize": 2,
-    "build_exe": "build",
 }
 
-
+# Base settings
 base = None
 if sys.platform == "win32":
     base = "Win32GUI"
@@ -48,15 +55,15 @@ executables = [
         script="imagePawcess.py",
         base=base,
         target_name="imagePawcess.exe",
-        icon="imagePawcess.ico",  # Set the application icon
+        icon="app_icon.ico",
     )
 ]
 
 # Setup configuration
 setup(
     name="ImagePawcess",
-    version="1.0",
-    description="A description of your application",
+    version="2.0.2",
+    description="Create stamps with any image and save your in-game art! F4 for menu",
     options={"build_exe": build_exe_options},
     executables=executables,
 )
