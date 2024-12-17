@@ -2,7 +2,7 @@
 A stamp and art saving mod for for WEBFISHING using GDWeave
 
 <p align="left">
-  <img src="https://github.com/unpaid-intern/StampMod/blob/dcdaf02acb6fb342d23e4b34116d9ebc933d3c84/README.png?raw=true" alt="UNDERTALE CLICKBAIT"/>
+  <img src="https://raw.githubusercontent.com/unpaid-intern/StampMod/main/README.png" alt="fucked up off da pinterest"/>
 </p>
 
 
@@ -24,7 +24,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 # Keybinds
 > **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
-- **`F9` Key**  
+- **`F4` Key**  
   - Opens my stamp menu executable.
 
 - **`PLUS` Key (+)**  

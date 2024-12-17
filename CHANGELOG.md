@@ -22,6 +22,10 @@ got ctrl z to function and changed keybinds
 - changed location of saved stamps to %appdata%/local/webfishing_stamp_mod or whatever the fuck Linux ppl use (so now everything wont get deleted every update)
 - faster launching executable
 - added executable manager
+# 2.0.1
+- using... gentler compression??? because thunderstore SUCKS. and made launching it less hard to mess up
+# 2.0.2 
+- i cant stop messing up. better dock handling system, changed default keybind and readme. more menu art
 > future updates:
 - linux version
 - improved preprocessing logic

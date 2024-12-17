@@ -6708,7 +6708,7 @@ def create_default_config(config_path: Path):
     Create a default JSON configuration file at the given path.
     """
     default_config_data = {
-        "open_menu": 16777252,
+        "open_menu": 16777247,
         "spawn_stamp": 61,
         "ctrl_z": 16777220,
         "toggle_playback": 45,
