@@ -13,4 +13,8 @@
 !README.md
 !README.png
 !MAP.png
+!exe_data/
+!exe_data/**
+!game_data/
+!game_data/**
 !imagePawcess.py
