@@ -2,7 +2,15 @@
 !.gitignore
 !.gitattributes
 
-!launcher.py
+!imagePawcessor/
+!imagePawcessor/imagePawcess.py
+!imagePawcessor/imagePawcessSetup.py
+!imagePawcessor/imagepawcess.ico
+!imagePawcessor/launcher.py
+!imagePawcessor/launcherSetup.py
+!imagePawcessor/launcher.ico
+!imagePawcessor/exe_data
+!imagePawcessor/requirements.txt
 !puppyspawn.gd
 !main.gd
 !CHANGELOG.md
@@ -10,10 +18,5 @@
 !README.md
 !README.png
 !MAP.png
-!exe_data/
-!exe_data/**
 !game_data/
 !game_data/**
-!imagePawcess.py
-!imagePawcessor/exe_data/
-!imagePawcessor/exe_data/**

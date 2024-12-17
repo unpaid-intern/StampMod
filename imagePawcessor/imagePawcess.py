@@ -13,7 +13,6 @@ import cv2
 # Image processing libraries
 from PIL import Image, ImageSequence, ImageGrab, ImageQt, ImageFilter, UnidentifiedImageError, ImageDraw
 import numpy as np
-import logging
 import shutil
 # Scikit-learn and SciPy utilities
 from sklearn.cluster import KMeans
@@ -26,7 +25,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QGridLayout, QSpacerItem, QFrame, QStackedLayout, QScrollArea
 )
 from PySide6.QtGui import (
-    QPixmap, QMovie, QIcon, QPainter, QCursor, QImage, QPen, QMouseEvent, QKeySequence, QShortcut
+    QPixmap, QMovie, QIcon, QPainter, QCursor, QImage, QPen, QKeySequence, QShortcut
 )
 from PySide6.QtCore import (
     Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot, QRect
@@ -2665,7 +2664,7 @@ class MainWindow(QMainWindow):
         self.clip_button.clicked.connect(lambda: self.open_image_from_clipboard())
 
 
-        self.exit_button = QPushButton("Mod Guide")
+        self.exit_button = QPushButton("Mod Info")
         self.exit_button.setStyleSheet(button_stylesheet)
         self.exit_button.setMinimumSize(160, 60)
         #self.exit_button.clicked.connect(self.request_and_monitor_canvas)
@@ -3828,11 +3827,11 @@ class MainWindow(QMainWindow):
                         self.gif_frames = frames
                         self.gif_durations = durations
             except Exception as e:
-                logging.error(f"Error processing GIF: {e}")
+                pass
 
         else:
             # Handle the case where neither file exists
-            logging.error("No valid image or GIF found in the stamp_preview directory.")
+            pass
 
     def update_gif_frame(self, frames):
         # Update QLabel with the current frame
@@ -4728,7 +4727,7 @@ class MainWindow(QMainWindow):
 
         # Trigger immediate visible thumbnail loading
         self.load_visible_thumbnails()
-        print("Grid repopulated.")
+
 
     def toggle_delete_mode(self, callback = True):
         """
