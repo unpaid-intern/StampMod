@@ -2,7 +2,7 @@ extends Node
 
 # Preload the puppyspawn script
 onready var _Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new()
-var debug = true
+var debug = false
 # API and path variables
 var KeybindsAPI = null
 var img_path = null
@@ -28,7 +28,7 @@ var prefix = "[Stamps Config Handler] "
 var config_data = {}
 
 var default_config_data = {
-	"open_menu": 16777252,
+	"open_menu": 16777247,
 	"spawn_stamp": 61,
 	"ctrl_z": 16777220,
 	"toggle_playback": 45,
@@ -260,12 +260,13 @@ func reset_config():
 	
 	# Save the default configuration back to the file
 	if file.open(config_path, File.WRITE) == OK:
-		var json_string = JSON.print(config_data, "\t")  # Pretty-print the default config
+		var json_string = JSON.print(config_data, "\t")
 		file.store_string(json_string)
 		file.close()
 		print(prefix, "Configuration reset to default values.")
 	else:
 		print(prefix, "Failed to open config file for writing during reset.")
+		
 
 # Function to save the current config_data to the JSON file
 func save_config():
@@ -290,6 +291,8 @@ func get_action_scancode(action_name: String) -> int:
 		print(prefix, "Action name not found: ", action_name)
 		return -1
 		
+
+
 func check_updates():
 	var was_player_present = false
 	var config_path = _get_config_location()
@@ -306,14 +309,8 @@ func check_updates():
 			
 			var json_result = JSON.parse(data)
 			if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
-				var config_data = json_result.result
+				config_data = json_result.result
 
-				# Check if the config is malformed or has less than 8 keys
-				if config_data.size() < 8:
-					print(prefix + "Config is malformed or too short. Resetting to default.")
-					reset_config()
-					continue  # Skip the rest of the loop to avoid using the malformed config
-				
 				# Handle "walky_talky_webfish" for canvas data
 				if config_data.has("walky_talky_webfish") and str(config_data["walky_talky_webfish"]) != "nothing new!":
 					var webfish_value = str(config_data["walky_talky_webfish"])
@@ -327,20 +324,20 @@ func check_updates():
 						var updated_json = JSON.print(config_data, "\t")
 						file.store_string(updated_json)
 						file.close()
-						print(prefix + "Config file updated successfully.")
+						print(prefix, "Config file updated successfully.")
 					else:
-						print(prefix + "Failed to write updated config.")
+						print(prefix, "Failed to write updated config.")
 			else:
-				print(prefix + "Failed to parse config file. Resetting to default.")
-				reset_config()
+				print(prefix, "Failed to parse config file.")
+				load_or_create_config()
 		else:
-			print(prefix + "Failed to open config file. Resetting to default.")
-			reset_config()
+			print(prefix, "Failed to open config file.")
+			load_or_create_config()
 			
 		# Check player presence and handle spawning
 		var current_scene = get_tree().current_scene
 		if current_scene == null:
-			print(prefix + "No current scene found.")
+			print(prefix, "No current scene found.")
 			continue
 
 		var _Player = current_scene.get_node_or_null("Viewport/main/entities/player")
@@ -349,14 +346,13 @@ func check_updates():
 			if was_player_present:
 				if _Spawn:
 					_Spawn.queue_free()
-				_Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").instance()  # .instance() for Godot 3.x.x
+				_Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new()
 				add_child(_Spawn)
-				print(prefix + "Player was removed. Respawned _Spawn node.")
+				print(prefix, "Player was removed. Respawned _Spawn node.")
 			was_player_present = false
 		else:
 			was_player_present = true
 			in_game = true
-
 
 
 # Handle walky_talky_webfish

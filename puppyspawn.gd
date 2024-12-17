@@ -1,6 +1,6 @@
 extends Spatial
 
-var debug = true
+var debug = false
 
 onready var _PlayerData = get_node_or_null("/root/PlayerData")
 onready var _OptionsMenu = get_node_or_null("/root/OptionsMenu")
@@ -52,6 +52,7 @@ var manual_frame_index = 0
 var current_zone = "main_zone"
 var img_override = false
 var grid = 0
+var shoulddel = false
 var old_pid = 0
 enum BrushMode{
 	PENCIL, 
@@ -68,6 +69,8 @@ var ray_detector = null
 var img_path = null
 var frames_path = null
 var gui_path = null
+
+var wait = false
 
 func _ready():
 	if debug:
@@ -132,13 +135,22 @@ func _delete():
 		_Chalknode = null
 		_grid.clear()
 		_tile.clear()
-	
+		shoulddel = false
+		
 func open_menu():
 	update_dynamic_nodes()
+	
+	
 	
 	# Check if HUD is using chat
 	if _hud && _hud.using_chat:
 		return
+	
+	if wait:
+		PlayerData._send_notification("GRRR be patient", 1)
+		return
+		
+	wait = true
 	
 	var gui_dir = gui_path.get_base_dir()
 	
@@ -161,9 +173,17 @@ func open_menu():
 	
 	if pid == 0:
 		PlayerData._send_notification("Failed to launch my GUI qwq", 1)
+		wait = false
 		return
 		
 	PlayerData._send_notification("Stamp Menu Launching! (give it a sec)", 0)
+	
+	resetwait()
+	
+func resetwait():
+	yield(get_tree().create_timer(3), "timeout")
+	wait = false
+	
 		
 func spawn_stamp():
 	if !update_dynamic_nodes():
@@ -229,6 +249,7 @@ func _spawn_canvas(pos, _offset = 10):
 	var offsets = []
 	if four && grid == 0:
 		# Determine offsets based on player direction
+		shoulddel = true
 		match dir:
 			"down":
 				offsets = [
@@ -278,6 +299,7 @@ func _spawn_canvas(pos, _offset = 10):
 		four = false
 		var canvas_pos = Vector3.ZERO + pos
 		if grid == 0:
+			shoulddel = true
 			canvas_pos.y -= 0.0084
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
@@ -439,8 +461,10 @@ func check_image_resolution(file_path, pos):
 						pos = Vector3(154+(imgy / 2), -0.3, 1.4)
 						dir = "left"
 						PlayerData._send_notification("Spawning at dock!", 0)
-						_delete()
-						yield(get_tree().create_timer(0.4), "timeout")
+						if shoulddel:
+							_delete()
+							yield(get_tree().create_timer(0.6), "timeout")
+
 						if imgx <= 20 and imgy <= 20:
 							origin = pos
 							four = false
@@ -510,7 +534,7 @@ func check_image_resolution(file_path, pos):
 						_chalk_send()
 			else:
 				_delete()
-				yield(get_tree().create_timer(0.5), "timeout")
+				yield(get_tree().create_timer(0.6), "timeout")
 				isgif = new_isgif
 				gifdir = dir
 				if imgx <= 20 and imgy <= 20:
@@ -596,7 +620,7 @@ func display_image(file_path, pos):
 			else:
 				push_error("Malformed line in file: %s" % line)
 	if !grid == 0:
-		if ctrlz_array.size() >= 20:
+		if ctrlz_array.size() >= 32:
 			ctrlz_array.remove(0)
 		print("added from ", grid)
 		ctrlz_array.append([temparray, game_grid, game_tile, game_canvas_id])
@@ -638,7 +662,7 @@ func toggle_playback(message = true):
 			PlayerData._send_notification("Playing!", 0)
 		_play()
 
-func toggle_playback_mode(message = false):
+func toggle_playback_mode(_message = false):
 	var prior = playback_mode
 	playback_mode = int(playback_mode) + 1
 	if playback_mode > PlaybackMode.MANUAL:

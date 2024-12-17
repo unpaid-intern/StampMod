@@ -1,0 +1,16 @@
+# Ignore everything by default
+*
+
+
+!.gitignore
+!.gitattributes
+
+!launcher.py
+!puppyspawn.gd
+!main.gd
+!CHANGELOG.md
+!icon.png
+!README.md
+!README.png
+!MAP.png
+!imagePawcess.py
