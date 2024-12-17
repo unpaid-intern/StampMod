@@ -2234,7 +2234,7 @@ class MainWindow(QMainWindow):
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
-        self.move_to_bottom_right()
+        self.move_to_center()
         self.padding_x = 0
         self.padding_y = 0
         self._is_dragging = False
@@ -2291,7 +2291,7 @@ class MainWindow(QMainWindow):
         # Setup UI
         self.setup_ui()
         self.init_worker()
-        #self.bring_to_front()
+        self.bring_to_front()
 
     def mousePressEvent(self, event):
         if (
@@ -2334,28 +2334,61 @@ class MainWindow(QMainWindow):
         
         # Shortcut for Undo (Ctrl+Z)
         
-    def move_to_bottom_right(self):
+    def move_to_center(self):
         """
-        Moves the window to the bottom-right corner of the screen with a 26-pixel offset.
+        Moves the window to the center of the appropriate screen.
         """
-        screen = QApplication.primaryScreen()
-        screen_geometry = screen.availableGeometry()
-        x = screen_geometry.x() + screen_geometry.width() - self.width() - 26  # 26px offset from the right
-        y = screen_geometry.y() + screen_geometry.height() - self.height() - 56  # 26px offset from the bottom
-        self.move(x, y)
+        # Ensure the window is shown to have valid size
+        self.show()
+
+        # Determine the target screen
+        current_screen = self.get_current_screen()
+
+        if not current_screen:
+            current_screen = QApplication.primaryScreen()
+
+        # Get the available geometry of the target screen
+        screen_geometry = current_screen.availableGeometry()
+
+        # Get the size of the window
+        window_geometry = self.frameGeometry()
+
+        # Calculate the center point
+        center_point = screen_geometry.center()
+
+        # Move the window's center to the screen's center
+        window_geometry.moveCenter(center_point)
+
+        # Apply the new top-left position to the window
+        self.move(window_geometry.topLeft())
+
+    def get_current_screen(self):
+        """
+        Determines which screen the window is currently on.
+        Returns the QScreen object or None if not found.
+        """
+        # Get the current center position of the window
+        window_pos = self.frameGeometry().center()
+
+        # Find the screen at the window's center position
+        return QApplication.screenAt(window_pos)
 
 
     def bring_to_front(self):
         """Brings the window to the front without disabling the close button."""
-        # Preserve the existing flags while ensuring 'WindowStaysOnTopHint' is added temporarily
-        original_flags = self.windowFlags()
-        self.setWindowFlags(original_flags | Qt.WindowStaysOnTopHint)
+        # Ensure the window is visible
         self.show()
+        
+        # Activate and raise the window
         self.activateWindow()
         self.raise_()
-        # Restore the original flags
-        self.setWindowFlags(original_flags)
-        self.show()
+        
+        # Temporarily set the WindowStaysOnTopHint flag
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        self.show()  # Re-apply the flag to enforce the change
+        
+        # Use QTimer to remove the flag after a short delay to minimize flicker
+        QTimer.singleShot(100, lambda: (self.setWindowFlag(Qt.WindowStaysOnTopHint, False), self.show()))
 
 
 

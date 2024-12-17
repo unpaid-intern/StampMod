@@ -63,22 +63,42 @@ def get_config_path() -> Path:
     config_file = config_dir / "PurplePuppy.Stamps.json"
 
     return config_file
-
-
+    
 def load_config() -> dict:
+    """
+    Load the configuration from the config file.
+
+    Returns:
+        dict: The configuration data.
+    """
     config_path = get_config_path()
-    if not config_path.exists():
-        with open(config_path, 'w') as file:
-            json.dump({"pid": -1}, file, indent=4)
-        logging.info(f"Created default config at {config_path}")
+    try:
+        if config_path.exists():
+            with open(config_path, 'r') as file:
+                config = json.load(file)
+                logging.debug(f"Loaded config: {config}")
+                return config
+        else:
+            logging.warning(f"Config file not found at {config_path}. Assuming pid = -1.")
+            return {"pid": -1}
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON decode error in config file: {e}")
         return {"pid": -1}
-    with open(config_path, 'r') as file:
-        config = json.load(file)
-        logging.debug(f"Loaded config: {config}")
-        return config
+    except Exception as e:
+        logging.error(f"Unexpected error while loading config: {e}")
+        return {"pid": -1}
 
 
 def is_process_running_by_pid(pid: int) -> bool:
+    """
+    Check if a process with the given PID is running.
+
+    Args:
+        pid (int): Process ID.
+
+    Returns:
+        bool: True if the process is running, False otherwise.
+    """
     try:
         proc = psutil.Process(pid)
         running = proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE
@@ -90,6 +110,12 @@ def is_process_running_by_pid(pid: int) -> bool:
 
 
 def bring_to_front_windows(pid):
+    """
+    Bring the window of the specified process to the front on Windows.
+
+    Args:
+        pid (int): Process ID.
+    """
     try:
         def callback(hwnd, pid_to_match):
             _, found_pid = win32process.GetWindowThreadProcessId(hwnd)
@@ -106,13 +132,27 @@ def bring_to_front_windows(pid):
 
 
 def bring_to_front(pid):
+    """
+    Bring the specified process to the front based on the operating system.
+
+    Args:
+        pid (int): Process ID.
+    """
     if platform.system() == 'Windows':
         bring_to_front_windows(pid)
+    else:
+        logging.warning("Bringing process to front is not implemented for this OS.")
 
 
 def launch_process(launch_cmd):
     """
     Launch the target process and fully detach it so the parent launcher can exit safely.
+
+    Args:
+        launch_cmd (list): The command to execute.
+
+    Returns:
+        int: The PID of the launched process.
     """
     try:
         if platform.system() == 'Windows':
@@ -123,6 +163,7 @@ def launch_process(launch_cmd):
                 stderr=subprocess.DEVNULL
             )
         else:
+            # For Linux/MacOS, use os.setsid to detach and redirect output
             proc = subprocess.Popen(
                 launch_cmd,
                 start_new_session=True,
@@ -133,13 +174,6 @@ def launch_process(launch_cmd):
             )
 
         logging.info(f"Process launched successfully with PID {proc.pid}")
-
-        # Update config with new PID
-        config_path = get_config_path()
-        with open(config_path, 'w') as file:
-            json.dump({"pid": proc.pid}, file, indent=4)
-        logging.debug(f"Updated config with PID {proc.pid}")
-
         print(f"Process launched successfully with PID {proc.pid}")
         return proc.pid
     except Exception as e:

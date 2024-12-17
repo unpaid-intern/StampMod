@@ -8,7 +8,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 
 # General Information
-- **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Scanner, SecureAge, VirIT, Skyhigh (SWG), Sangfor Engine Zero, or Zillya antivirus (no it's **not a virus** lol)
+- **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Antivirus (no it's **not a virus** lol)
 - The stamps menu might take a moment to launch the first time
 - Currently only works for **Windows**
 - You can **paste images** into the menu directly or **select a file**
@@ -17,6 +17,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
 - Saved stamps are located at `%appdata%/local/webfishing_stamps_mod`
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
+- I recommend installing the [**`borderless fix`**](https://thunderstore.io/c/webfishing/p/dragonostic/BorderlessFix/) mod
 
 
 
@@ -109,7 +110,7 @@ If you wish to know the location of a specific canvas, please refer to the below
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
 2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip)
 3. Extract to `PurplePuppy-Stamps` and be careful to **not rename it**.
-4. Download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) and extract to `BlueberryWolfi.APIs`
+4. Download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract to `BlueberryWolfi.APIs`
 5. Place folders in `WEBFISHING/GDWeave/Mods/`
 
 ## Requires:
