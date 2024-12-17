@@ -1,7 +1,4 @@
-# Ignore everything by default
 *
-
-
 !.gitignore
 !.gitattributes
 
@@ -18,3 +15,5 @@
 !game_data/
 !game_data/**
 !imagePawcess.py
+!imagePawcessor/exe_data/
+!imagePawcessor/exe_data/**

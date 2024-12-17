@@ -4500,14 +4500,11 @@ class MainWindow(QMainWindow):
             grid_layout.addWidget(thumbnail_widget, row, col, alignment=Qt.AlignTop | Qt.AlignLeft)
             self.thumbnails.append(thumbnail_widget)
 
-        print("Grid populated with 1-pixel spacing.")
-
 
     def load_visible_thumbnails(self):
         """
         Loads visible thumbnails as the user scrolls or when triggered programmatically.
         """
-        print("load_visible_thumbnails triggered")  # Debug statement
 
         if not hasattr(self, 'thumbnails') or not hasattr(self, 'thumbnail_data'):
             print("Thumbnails or thumbnail data not initialized.")
@@ -4557,7 +4554,6 @@ class MainWindow(QMainWindow):
 
                     thumbnail_widget.setProperty("loaded", True)  # Mark as loaded
 
-        print("Lazy loading completed.")
 
 
     def lazy_load_thumbnails(self):
@@ -4581,7 +4577,7 @@ class MainWindow(QMainWindow):
         saved_stamps_dir = appdata_dir / "saved_stamps/"
 
         self.thumbnail_data = []
-        self.thumbnail_cache = {}  # Cache thumbnails to avoid direct file references
+        self.thumbnail_cache = {}
 
         if not saved_stamps_json.exists():
             print("No saved_stamps.json file found.")
@@ -4598,14 +4594,13 @@ class MainWindow(QMainWindow):
             folder_path = saved_stamps_dir / key
             preview_path = folder_path / "preview.webp"
 
-            print(f"Checking path: {preview_path}")
             if preview_path.exists():
                 try:
                     pixmap = QPixmap(str(preview_path))
                     if not pixmap.isNull():
                         self.thumbnail_cache[key] = pixmap
                         self.thumbnail_data.append({
-                            "path": str(preview_path),  # Keeping for debug or additional logic
+                            "path": str(preview_path),
                             "is_gif": value.get("is_gif", False),
                             "key": key
                         })
