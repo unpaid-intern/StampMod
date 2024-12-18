@@ -32,7 +32,7 @@ var default_config_data = {
 	"spawn_stamp": 61,
 	"ctrl_z": 16777220,
 	"toggle_playback": 45,
-	"gif_ready" : false,
+	"gif_ready" : true,
 	"walky_talky_webfish": "nothing new!",
 	"walky_talky_menu" : "nothing new!"
 }
@@ -179,7 +179,7 @@ func _get_frames_location()->String:
 
 func _get_gui_location() -> String:
 	var gdweave_dir = _get_gdweave_dir()
-	var executable_name = "launcher"
+	var executable_name = "imagePawcessor"
 	
 	# Add platform-specific file extension if needed
 	if OS.get_name() == "Windows":
@@ -234,6 +234,10 @@ func load_or_create_config():
 			if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
 				config_data = json_result.result
 				print(prefix, "Config loaded successfully: ", config_data)
+				if config_data.size() != 7:
+					print(prefix, "Invalid Config Size, Resetting")
+					reset_config()
+				return
 			else:
 				print(prefix, "Failed to parse config file. Using default config.")
 				config_data = default_config_data.duplicate()
@@ -401,6 +405,6 @@ func _stamp():
 	
 func _gif():
 	emit_signal("_play")
-	
+
 func _ctrlz():
 	emit_signal("_delete")

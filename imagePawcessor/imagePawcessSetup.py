@@ -54,7 +54,7 @@ executables = [
     Executable(
         script="imagePawcess.py",
         base=base,
-        target_name="imagePawcess.exe",
+        target_name="imagePawcessor.exe",
         icon="app_icon.ico",
     )
 ]

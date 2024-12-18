@@ -1,7 +1,5 @@
 extends Spatial
 
-var debug = false
-
 onready var _PlayerData = get_node_or_null("/root/PlayerData")
 onready var _OptionsMenu = get_node_or_null("/root/OptionsMenu")
 onready var _Network = get_node_or_null("/root/Network")
@@ -54,6 +52,7 @@ var img_override = false
 var grid = 0
 var shoulddel = false
 var old_pid = 0
+var another = false
 enum BrushMode{
 	PENCIL, 
 	ERASER, 
@@ -71,6 +70,8 @@ var frames_path = null
 var gui_path = null
 
 var wait = false
+
+var debug = false
 
 func _ready():
 	if debug:
@@ -102,13 +103,13 @@ func re_ready():
 func _chalk_update(pos):
 	last_mouse_pos = pos
 
-func _delete():
+func _delete(gif=false):
 	if !update_dynamic_nodes():
 		return
 	if _hud.using_chat && _hud:
 		return
-	isgif = false
 	_framedelay = null
+	processing = false
 	_framecount = null
 	_playing = false
 	var delete = []
@@ -136,6 +137,31 @@ func _delete():
 		_grid.clear()
 		_tile.clear()
 		shoulddel = false
+		
+	if gif:
+		var file = File.new()
+
+		if not file.file_exists(img_path):
+			push_error("File does not exist: %s" % img_path)
+			return
+
+		if file.open(img_path, File.READ) != OK:
+			push_error("Failed to open file: %s" % img_path)
+			return
+
+		if not file.eof_reached():
+			var size_line = file.get_line().strip_edges()
+			var size_parts = size_line.split(",")
+			imgx = size_parts[0].to_float()
+			imgy = size_parts[1].to_float()
+			if size_parts[2] == "gif":
+				isgif = true
+				_framecount = size_parts[3].to_int()
+				_framedelay = size_parts[4].to_int()
+				processing = false
+				_playing = false
+				another = false
+		
 		
 func open_menu():
 	update_dynamic_nodes()
@@ -282,7 +308,7 @@ func _spawn_canvas(pos, _offset = 10):
 		# Spawn canvases at each offset
 		for offset in offsets:
 			var canvas_pos = pos + offset
-			canvas_pos.y -= 0.0084
+			canvas_pos.y -= 0.0087
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
 			print("Created new canvas at ", canvas_pos)
@@ -300,7 +326,7 @@ func _spawn_canvas(pos, _offset = 10):
 		var canvas_pos = Vector3.ZERO + pos
 		if grid == 0:
 			shoulddel = true
-			canvas_pos.y -= 0.0084
+			canvas_pos.y -= 0.0087
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
 			print("spawning at ", current_zone)
@@ -376,11 +402,9 @@ func clear_canvas():
 	_chalk_send()
 
 func check_image_resolution(file_path, pos):
-	if !isgif:
-		dir = _get_player_facing_direction()
-		print(dir)
+	dir = _get_player_facing_direction()
 	var file = File.new()
-	var new_isgif = false
+	isgif = false
 	
 	if not file.file_exists(file_path):
 		push_error("File does not exist: %s" % file_path)
@@ -393,102 +417,23 @@ func check_image_resolution(file_path, pos):
 	if not file.eof_reached():
 		var size_line = file.get_line().strip_edges()
 		var size_parts = size_line.split(",")
-		if size_parts.size() < 6 && not size_parts.size() == 0:
-			imgx = size_parts[0].to_float()
-			imgy = size_parts[1].to_float()
-			if size_parts[2]:
-				if size_parts[2] == "gif":
-					new_isgif = true
-					_framecount = size_parts[3].to_int()
-					_framedelay = size_parts[4].to_int()
-			else:
-				push_error("Incorrect Formatting: %s" % file_path)
-			if new_canvas:
-				var ogaboga = false
-				if Input.is_key_pressed(KEY_SHIFT):
-					pos = _Player.global_transform.origin
-					if ray_detector:
-						var ray_position = pos + Vector3(0, 20, 0)
-						ray_detector.detect_collision_at(ray_position)
-						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
-						ray_detector.detect_collision_at(ray_position)
-						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
-						ray_detector.detect_collision_at(ray_position)
-						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
-						ray_detector.detect_collision_at(ray_position)
-						var ground_y = ray_detector.get_ground_y()
-						if ground_y != null:
-							pos.y = ground_y
-						else:
-							pos.y -= 0.9955
-						ogaboga = true
-				elif Input.is_key_pressed(KEY_SHIFT):
-					pos = _Player.global_transform.origin
-					if ray_detector:
-						var ray_position = pos + Vector3(0, 20, 0)
-						ray_detector.detect_collision_at(ray_position)
-						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
-						ray_detector.detect_collision_at(ray_position)
-						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
-						ray_detector.detect_collision_at(ray_position)
-						yield(get_tree().create_timer(1.0 / 80.0), "timeout")
-						ray_detector.detect_collision_at(ray_position)
-						var ground_y = ray_detector.get_ground_y()
-						if ground_y != null:
-							pos.y = ground_y
-						else:
-							pos.y -= 0.9955
-						ogaboga = true
-				elif Input.is_key_pressed(KEY_1):
-					pos = Vector3(48.571999, 0, -51.041)
-					PlayerData._send_notification("Spawning at canvas 1!", 0)
-					ogaboga = true
-				elif Input.is_key_pressed(KEY_2):
-					pos = Vector3(69.571999, 0, -54.952999)
-					PlayerData._send_notification("Spawning at canvas 2!", 0)
-					ogaboga = true
-				elif Input.is_key_pressed(KEY_3):
-					pos = Vector3(-54.7896, 0, -115.719002)
-					PlayerData._send_notification("Spawning at canvas 3!", 0)
-					ogaboga = true
-				elif Input.is_key_pressed(KEY_4):
-					pos = Vector3(-25.781099, 0, -34.5681)
-					PlayerData._send_notification("Spawning at canvas 4!", 0)
-					ogaboga = true
-				else:
-					if Input.is_key_pressed(KEY_CONTROL):
-						isgif = new_isgif
-						pos = Vector3(154+(imgy / 2), -0.3, 1.4)
-						dir = "left"
-						PlayerData._send_notification("Spawning at dock!", 0)
-						if shoulddel:
-							_delete()
-							yield(get_tree().create_timer(0.6), "timeout")
+		imgx = size_parts[0].to_float()
+		imgy = size_parts[1].to_float()
+		if size_parts[2] == "gif":
+			isgif = true
+			print("its a gif")
+			_framecount = size_parts[3].to_int()
+			print(_framecount)
+			_framedelay = size_parts[4].to_int()
+			processing = false
+			_playing = false
+			another = false
 
-						if imgx <= 20 and imgy <= 20:
-							origin = pos
-							four = false
-							_spawn_canvas(origin)
-							display_image(file_path, origin)
-							_chalk_send()
-							return
-						else:
-							var _offset = null
-							if imgy >= imgx:
-								_offset = (imgy - 20) / 2
-							else:
-								_offset = (imgx - 20) / 2
-							if _offset > 10 || _offset < 0:
-								_offset = 10
-							if new_canvas:
-								origin = pos
-								four = true
-								_spawn_canvas(origin, _offset)
-								display_image(file_path, origin)
-								_chalk_send()
-							return 
-							
-				if ray_detector && not ogaboga:
+		if new_canvas:
+			var ogaboga = false
+			if Input.is_key_pressed(KEY_SHIFT):
+				pos = _Player.global_transform.origin
+				if ray_detector:
 					var ray_position = pos + Vector3(0, 20, 0)
 					ray_detector.detect_collision_at(ray_position)
 					yield(get_tree().create_timer(1.0 / 80.0), "timeout")
@@ -502,61 +447,139 @@ func check_image_resolution(file_path, pos):
 						pos.y = ground_y
 					else:
 						pos.y -= 0.9955
-				if Input.is_key_pressed(KEY_DOWN):
-					pos -= Vector3(0, 4, 0)
-				else:
-					if Input.is_key_pressed(KEY_UP):
-						pos += Vector3(0, 4, 0)
-						
-			if (is_in_any_grid(pos) && current_zone == "main_zone") || _canvas_id.empty():
-				_playing = false
-				isgif = new_isgif
-				gifdir = dir
-				if imgx <= 20 and imgy <= 20:
-					origin = pos
-					four = false
-					_spawn_canvas(origin)
-					display_image(file_path, origin)
-					_chalk_send()
-				else:
-					var _offset = null
-					if imgy >= imgx:
-						_offset = (imgy - 20) / 2
+					ogaboga = true
+			elif Input.is_key_pressed(KEY_SHIFT):
+				pos = _Player.global_transform.origin
+				if ray_detector:
+					var ray_position = pos + Vector3(0, 20, 0)
+					ray_detector.detect_collision_at(ray_position)
+					yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+					ray_detector.detect_collision_at(ray_position)
+					yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+					ray_detector.detect_collision_at(ray_position)
+					yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+					ray_detector.detect_collision_at(ray_position)
+					var ground_y = ray_detector.get_ground_y()
+					if ground_y != null:
+						pos.y = ground_y
 					else:
-						_offset = (imgx - 20) / 2
-					if _offset > 10 || _offset < 0:
-						_offset = 10
-					if new_canvas:
-						origin = pos
-						four = true
-						_spawn_canvas(origin, _offset)
-						display_image(file_path, origin)
-						_chalk_send()
+						pos.y -= 0.9955
+					ogaboga = true
+			elif Input.is_key_pressed(KEY_1):
+				pos = Vector3(48.571999, 0, -51.041)
+				PlayerData._send_notification("Spawning at canvas 1!", 0)
+				ogaboga = true
+			elif Input.is_key_pressed(KEY_2):
+				pos = Vector3(69.571999, 0, -54.952999)
+				PlayerData._send_notification("Spawning at canvas 2!", 0)
+				ogaboga = true
+			elif Input.is_key_pressed(KEY_3):
+				pos = Vector3(-54.7896, 0, -115.719002)
+				PlayerData._send_notification("Spawning at canvas 3!", 0)
+				ogaboga = true
+			elif Input.is_key_pressed(KEY_4):
+				pos = Vector3(-25.781099, 0, -34.5681)
+				PlayerData._send_notification("Spawning at canvas 4!", 0)
+				ogaboga = true
 			else:
-				_delete()
-				yield(get_tree().create_timer(0.6), "timeout")
-				isgif = new_isgif
-				gifdir = dir
-				if imgx <= 20 and imgy <= 20:
-					origin = pos
-					four = false
-					_spawn_canvas(origin)
-					display_image(file_path, origin)
-					_chalk_send()
-				else:
-					var _offset = null
-					if imgy >= imgx:
-						_offset = (imgy - 20) / 2
-					else:
-						_offset = (imgx - 20) / 2
-					if _offset > 10 || _offset < 0:
-						_offset = 10
-					if new_canvas:
+				if Input.is_key_pressed(KEY_CONTROL):
+					pos = Vector3(154+(imgy / 2), -0.3, 1.4)
+					dir = "left"
+					PlayerData._send_notification("Spawning at dock!", 0)
+					if shoulddel:
+						_delete(true)
+						yield(get_tree().create_timer(0.6), "timeout")
+
+					if imgx <= 20 and imgy <= 20:
 						origin = pos
-						four = true
-						_spawn_canvas(origin, _offset)
+						four = false
+						_spawn_canvas(origin)
 						display_image(file_path, origin)
 						_chalk_send()
+						return
+					else:
+						var _offset = null
+						if imgy >= imgx:
+							_offset = (imgy - 20) / 2
+						else:
+							_offset = (imgx - 20) / 2
+						if _offset > 10 || _offset < 0:
+							_offset = 10
+						if new_canvas:
+							origin = pos
+							four = true
+							_spawn_canvas(origin, _offset)
+							display_image(file_path, origin)
+							_chalk_send()
+						return 
+						
+			if ray_detector && not ogaboga:
+				var ray_position = pos + Vector3(0, 20, 0)
+				ray_detector.detect_collision_at(ray_position)
+				yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+				ray_detector.detect_collision_at(ray_position)
+				yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+				ray_detector.detect_collision_at(ray_position)
+				yield(get_tree().create_timer(1.0 / 80.0), "timeout")
+				ray_detector.detect_collision_at(ray_position)
+				var ground_y = ray_detector.get_ground_y()
+				if ground_y != null:
+					pos.y = ground_y
+				else:
+					pos.y -= 0.9955
+			if Input.is_key_pressed(KEY_DOWN):
+				pos -= Vector3(0, 4, 0)
+			else:
+				if Input.is_key_pressed(KEY_UP):
+					pos += Vector3(0, 4, 0)
+					
+		if (is_in_any_grid(pos) && current_zone == "main_zone") || _canvas_id.empty():
+			_playing = false
+			gifdir = dir
+			if imgx <= 20 and imgy <= 20:
+				origin = pos
+				four = false
+				_spawn_canvas(origin)
+				display_image(file_path, origin)
+				_chalk_send()
+			else:
+				var _offset = null
+				if imgy >= imgx:
+					_offset = (imgy - 20) / 2
+				else:
+					_offset = (imgx - 20) / 2
+				if _offset > 10 || _offset < 0:
+					_offset = 10
+				if new_canvas:
+					origin = pos
+					four = true
+					_spawn_canvas(origin, _offset)
+					display_image(file_path, origin)
+					_chalk_send()
+		else:
+			_delete(true)
+			yield(get_tree().create_timer(0.6), "timeout")
+			gifdir = dir
+			if imgx <= 20 and imgy <= 20:
+				origin = pos
+				four = false
+				_spawn_canvas(origin)
+				display_image(file_path, origin)
+				_chalk_send()
+			else:
+				var _offset = null
+				if imgy >= imgx:
+					_offset = (imgy - 20) / 2
+				else:
+					_offset = (imgx - 20) / 2
+				if _offset > 10 || _offset < 0:
+					_offset = 10
+				if new_canvas:
+					origin = pos
+					four = true
+					_spawn_canvas(origin, _offset)
+					display_image(file_path, origin)
+					_chalk_send()
 	file.close()
 
 func display_image(file_path, pos):
@@ -628,6 +651,7 @@ func display_image(file_path, pos):
 	base = base_offset + Vector3(0.01234, 0 , 0.01234)
 	_chalk_send()
 	if isgif:
+		print("IM A GIF")
 		match orientation:
 			"up": base_offset = Vector3(0.5 * imgx, 0, 0.5 * imgy)
 			"right": base_offset = Vector3(-0.5 * imgy, 0, 0.5 * imgx)
@@ -635,15 +659,19 @@ func display_image(file_path, pos):
 			"down": base_offset = Vector3(-0.5 * imgx, 0, -0.5 * imgy)
 			_:
 				return
-		newgif()
+		if isready():
+			newgif()
 	
 func toggle_playback(message = true):
 	if not isgif or frames_path == "" or processing:
 		if message:
 			PlayerData._send_notification("No gif to play!", 1)
 		return
-	if frame_data.size() != _framecount:
-		print("error, incomplete frame data")
+	if !isready():
+		PlayerData._send_notification("Still being processed!", 1)
+		return
+	if !another || frame_data.size() != _framecount:
+		PlayerData._send_notification("Still being processed!", 1)
 		newgif()
 		return
 	if playback_mode == PlaybackMode.MANUAL:
@@ -674,41 +702,77 @@ func toggle_playback_mode(_message = false):
 		_play()
 
 func newgif():
-	if processing:
-		return # Prevent re-entry if already processing
+	print("I GOT RESET")
 	processing = true
 	_playing = false
-	frame_delays.clear()
-	frame_data.clear()
-	manual_frame_index = 0 # Reset manual playback index
 	
+	# Explicit reset of frame-related data
+	frame_delays = []  # Reset frame delays
+	frame_data = []    # Reset frame data
+	manual_frame_index = 0
+
 	var file = File.new()
 	if file.open(frames_path, File.READ) != OK:
 		push_error("Failed to open file: %s" % frames_path)
 		processing = false
 		return
 
+	var current_frame = null  # Temporary container for frame pixels
+	var current_delay = _framedelay if _framedelay != -1 else 100  # Default delay if none is provided
+
 	while not file.eof_reached():
 		var line = file.get_line().strip_edges()
+		
+		# Check for new frame start
 		if line.begins_with("frame,"):
-			# Extract per-frame delay if _framedelay == -1, otherwise use global delay
+			# If a current frame exists, append it to frame_data
+			if current_frame != null:
+				frame_data.append(current_frame)
+				frame_delays.append(current_delay)
+
+			# Start a new frame
+			current_frame = []
 			var frame_parts = line.split(",")
 			if _framedelay == -1 and frame_parts.size() > 2:
-				frame_delays.append(max(frame_parts[2].to_int(), 10)) # Delay of at least 10
+				current_delay = max(frame_parts[2].to_int(), 10)  # Set delay per-frame (min 10ms)
 			else:
-				frame_delays.append(_framedelay)
-			frame_data.append([]) # Start new frame
+				current_delay = _framedelay  # Use global delay
+
 		elif line != "":
+			# Ensure there is a valid current_frame to append to
+			if current_frame == null:
+				push_error("Pixel data encountered before frame start!")
+				continue
+			
+			# Parse pixel data
 			var pixel_parts = line.split(",")
 			if pixel_parts.size() == 3:
-				frame_data[-1].append({
+				current_frame.append({
 					"x": pixel_parts[0].to_float(),
 					"y": pixel_parts[1].to_float(),
 					"color": pixel_parts[2].to_int()
 				})
-	file.close()
-	processing = false # Processing is complete
 
+	# Append the final frame after EOF
+	if current_frame != null:
+		frame_data.append(current_frame)
+		frame_delays.append(current_delay)
+
+	file.close()
+	another = true
+
+	# Final processing check
+	print("Total frames loaded: ", frame_data.size())
+	print("Expected frame count: ", _framecount)
+	processing = false
+
+	# Sanity check
+	if frame_data.size() != _framecount:
+		print("WTF")
+	else:
+		print("Frame data reset and loaded successfully!")
+
+	
 func _play():
 	while _playing:
 		if playback_mode == PlaybackMode.MANUAL:
@@ -867,6 +931,24 @@ func _chalk_send():
 		if send_load.size() > 0:
 				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load.duplicate(), "canvas_id": game_canvas_id}, "all", 2, Network.CHANNELS.CHALK)
 				send_load.clear()
+
+func isready():
+	var file = File.new()
+	var config_path = key_handler.cnfg_path
+	
+	if file.open(config_path, File.READ) == OK:
+		var data = file.get_as_text()
+		file.close()
+		
+		var json_result = JSON.parse(data)
+		if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
+			var config_data = json_result.result
+
+			if config_data["gif_ready"]:
+				return true
+			else:
+				return false
+
 
 func get_data():
 	if key_handler.in_game:
