@@ -8,8 +8,6 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 
 # General Information
-- **`WILL FAIL TO DOWNLOAD PROPERLY`** if using McAfee Antivirus (no it's **not a virus** lol)
-- The stamps menu might take a moment to launch the first time
 - Currently only works for **Windows**
 - You can **paste images** into the menu directly or **select a file**
 - Stamps are automatically adjusted to be **upright relative to the player camera**
@@ -18,6 +16,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - Saved stamps are located at `%appdata%/local/webfishing_stamps_mod`
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
 - I recommend installing the [**`borderless fix`**](https://thunderstore.io/c/webfishing/p/dragonostic/BorderlessFix/) mod
+- The **Calico mod** can make transparent gifs appear to stutter while playing (its not me i swear)
 
 
 

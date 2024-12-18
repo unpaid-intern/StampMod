@@ -112,6 +112,8 @@ func _delete(gif=false):
 	processing = false
 	_framecount = null
 	_playing = false
+	if !gif:
+		isgif = false
 	var delete = []
 	var normal = true
 	for i in range(3):
@@ -173,7 +175,6 @@ func open_menu():
 		return
 	
 	if wait:
-		PlayerData._send_notification("GRRR be patient", 1)
 		return
 		
 	wait = true
@@ -207,7 +208,7 @@ func open_menu():
 	resetwait()
 	
 func resetwait():
-	yield(get_tree().create_timer(3), "timeout")
+	yield(get_tree().create_timer(1), "timeout")
 	wait = false
 	
 		
@@ -671,7 +672,6 @@ func toggle_playback(message = true):
 		PlayerData._send_notification("Still being processed!", 1)
 		return
 	if !another || frame_data.size() != _framecount:
-		PlayerData._send_notification("Still being processed!", 1)
 		newgif()
 		return
 	if playback_mode == PlaybackMode.MANUAL:
@@ -702,7 +702,6 @@ func toggle_playback_mode(_message = false):
 		_play()
 
 func newgif():
-	print("I GOT RESET")
 	processing = true
 	_playing = false
 	
@@ -761,9 +760,6 @@ func newgif():
 	file.close()
 	another = true
 
-	# Final processing check
-	print("Total frames loaded: ", frame_data.size())
-	print("Expected frame count: ", _framecount)
 	processing = false
 
 	# Sanity check

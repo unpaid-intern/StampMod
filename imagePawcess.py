@@ -6,6 +6,7 @@ import tempfile
 import json
 import time
 import math
+import struct
 from pathlib import Path
 import socket
 from filelock import FileLock, Timeout
@@ -32,7 +33,6 @@ from PySide6.QtGui import (
 from PySide6.QtCore import (
     Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot, QRect
 )
-
 
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
@@ -1372,7 +1372,7 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
     Processes and saves an animated image (GIF or WebP) according to specified parameters.
     """
     try:
-        
+        set_gif_ready_false()
         # Open frames.txt and clear its contents
         current_dir = exe_path_fs('game_data/current_stamp_data')
         os.makedirs(current_dir, exist_ok=True)  # Ensure the directory exists
@@ -1393,12 +1393,8 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
             message_callback(f"Total frames in image: {total_frames}")
 
         # Gather delays for each frame
-        delays = []
-        for frame_number in range(total_frames):
-            img.seek(frame_number)
-            delay = img.info.get('duration', 100)  # Default to 100ms if not specified
-            delays.append(delay)
 
+        delays = get_frame_delays(image_path)
         # Determine delay uniformity
         uniform_delay = delays[0] if all(d == delays[0] for d in delays) else -1
 
@@ -1581,13 +1577,112 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
 
         # Generate preview GIF after all processing is done
         create_preview_gif(total_frames, delays, preview_folder, color_key_array, progress_callback, message_callback, error_callback)
-
+        set_gif_ready_true()
         img.close()  # Close the image after processing
 
     except Exception as e:
         if error_callback:
             error_callback(f"An error occurred in process_and_save_gif: {e}")
-            
+
+def get_frame_delays(image_path):
+    """
+    Retrieves the delay (in milliseconds) for each frame in an animated GIF or WebP image.
+    If the image is a WebP, it converts it to GIF first to extract frame delays.
+
+    For WebP images, it keeps the valid frame durations and replaces missing or invalid
+    durations with the average of the valid durations.
+
+    Args:
+        image_path (str): Path to the animated image file.
+
+    Returns:
+        list: A list of delays for each frame in milliseconds.
+
+    Raises:
+        FileNotFoundError: If the image file does not exist.
+        ValueError: If the file format is unsupported or corrupted.
+        RuntimeError: If an error occurs during image processing.
+    """
+    if not os.path.isfile(image_path):
+        raise FileNotFoundError(f"File '{image_path}' does not exist.")
+
+    file_ext = os.path.splitext(image_path)[-1].lower()
+    if file_ext not in [".gif", ".webp"]:
+        raise ValueError("Unsupported file format. Only GIF and WebP are supported.")
+
+    delays = []
+
+    try:
+        if file_ext == ".gif":
+            # Handle GIFs directly
+            with Image.open(image_path) as img:
+                total_frames = getattr(img, "n_frames", 1)
+                print(f"Total frames: {total_frames}")
+
+                for frame_number, frame in enumerate(ImageSequence.Iterator(img)):
+                    duration = frame.info.get('duration', None)
+
+                    if duration is None:
+                        duration_ms = 100  # Default to 100ms if missing
+                    else:
+                        duration_ms = int(duration)
+
+                    # Validate duration
+                    if duration_ms <= 0:
+                        duration_ms = 100  # Default to 100ms if invalid
+
+                    delays.append(duration_ms)
+
+        elif file_ext == ".webp":
+            # Handle WebP by extracting frames and durations
+            with Image.open(image_path) as img:
+                if not getattr(img, "is_animated", False):
+                    raise ValueError("WebP image is not animated.")
+
+                total_frames = getattr(img, "n_frames", 1)
+                print(f"Total frames: {total_frames}")
+
+                # Extract frames and durations
+                frames = []
+                durations = []
+                for frame_number, frame in enumerate(ImageSequence.Iterator(img)):
+                    duration = frame.info.get('duration', None)
+
+                    if duration is None:
+                        duration_ms = None  # Mark as missing
+                    else:
+                        duration_ms = int(duration)  # Treat duration as milliseconds
+
+                    # Validate duration
+                    if duration_ms is not None and duration_ms <= 0:
+                        duration_ms = None  # Mark as invalid
+
+                    # Append frame and duration
+                    frames.append(frame.copy())
+                    durations.append(duration_ms)
+
+                # Calculate average delay from valid durations
+                valid_durations = [d for d in durations if d is not None and d > 0]
+                if not valid_durations:
+                    average_delay = 100  # Fallback average if all durations are invalid
+                    print("All frame durations are invalid or missing. Using fallback average delay of 100ms.")
+                else:
+                    average_delay = int(sum(valid_durations) / len(valid_durations))
+                    print(f"Average delay calculated from valid durations: {average_delay}ms")
+
+                # Assign delays: keep valid durations, replace missing/invalid with average
+                delays = [
+                    duration if (duration is not None and duration > 0) else average_delay
+                    for duration in durations
+                ]
+                print(f"Assigned delays to all {len(delays)} frames.")
+
+        return delays
+
+    except Exception as e:
+        raise RuntimeError(f"Error processing image '{image_path}': {e}")
+    
+
 def save_frames(img, target_size, process_mode, use_lab_flag, process_params, remove_bg, preprocess_flag, color_key_array,
                 progress_callback, message_callback, error_callback):
     """
@@ -6681,6 +6776,37 @@ def create_default_config():
         print(f"Failed to create config file: {e}")
         sys.exit(1)
 
+def set_gif_ready(value):
+    """
+    Set the "gif_ready" field in the configuration file to the specified value (True or False).
+    """
+    config_path = get_config_path()
+    
+    try:
+        # Read the existing configuration
+        with open(config_path, 'r') as file:
+            config_data = json.load(file)
+        
+        # Modify the "gif_ready" field
+        config_data["gif_ready"] = value
+        
+        # Write the updated configuration back to the file
+        with open(config_path, 'w') as file:
+            json.dump(config_data, file, indent=4)
+        
+        print(f"'gif_ready' set to {value} in configuration file.")
+    except Exception as e:
+        print(f"Failed to update 'gif_ready': {e}")
+        sys.exit(1)
+
+def set_gif_ready_true():
+    """Set 'gif_ready' to True."""
+    set_gif_ready(True)
+
+def set_gif_ready_false():
+    """Set 'gif_ready' to False."""
+    set_gif_ready(False)
+
 
 def ipc_server():
     """
@@ -6764,7 +6890,7 @@ def startup():
     # Check if the config file exists, create it if it doesn't
     if not config_path.exists():
         print("Config file not found. Creating default configuration...")
-        create_default_config(config_path)
+        create_default_config()
 
 if __name__ == '__main__':
     startup()
