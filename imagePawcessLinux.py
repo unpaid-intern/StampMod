@@ -2309,7 +2309,10 @@ class MainWindow(QMainWindow):
             "Hi im a computer beep boop",
             "Whaaatt? you dont have qhd???",
             "hello everybody my name is welcome",
-            ""
+            "linux was always better",
+            "xenia is the better mascot sorry tux",
+            "my castle town",
+            "beep boop"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
