@@ -82,7 +82,7 @@ def get_config_path() -> Path:
     base_path = get_base_path()
 
     # Navigate up until we reach 'GDWeave'
-    while base_path.name in ["mods", "PurplePuppy-Stamps"]:
+    while base_path.name in ["mods", "PurplePuppy-Stamps-Linux"]:
         base_path = base_path.parent
 
     # Ensure the resolved base path is correct
@@ -2289,7 +2289,7 @@ class MainWindow(QMainWindow):
         self.last_message_displayed = None
         self.connected = False
         self.window_titles = [
-            "I <3 PEANITS",
+            "<3 PEANITS",
             "are you kidding me?",
             "the hunt for purple chalk",
             "video game lover",
@@ -2298,7 +2298,6 @@ class MainWindow(QMainWindow):
             "Pupple Puppyy wuz here",
             "u,mm, Haiiii X3",
             "neeeddd.. moooree.. .adralll ,.,",
-            "animal people",
             "aaaaand its all over my screen",
             "if ive gone missin  ive gon fishn!",
             "the world is SPINNING, SPINNING!",
