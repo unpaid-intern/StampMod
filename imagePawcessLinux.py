@@ -82,7 +82,7 @@ def get_config_path() -> Path:
     base_path = get_base_path()
 
     # Navigate up until we reach 'GDWeave'
-    while base_path.name in ["mods", "PurplePuppy-Stamps-Linux"]:
+    while base_path.name in ["mods", "PurplePuppy-Stamps_Linux"]:
         base_path = base_path.parent
 
     # Ensure the resolved base path is correct
