@@ -8,23 +8,19 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 
 # General Information
-- Currently only works for **Windows**
-- You can **paste images** into the menu directly or **select a file**
+- You can **paste images** (not gifs qwq) into the menu directly or **select a file**
 - Stamps are automatically adjusted to be **upright relative to the player camera**
 - In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
 - **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
-- Saved stamps are located at `%appdata%/local/webfishing_stamps_mod`
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
-- I recommend installing the [**`borderless fix`**](https://thunderstore.io/c/webfishing/p/dragonostic/BorderlessFix/) mod
-- The **Calico mod** can make transparent gifs appear to stutter while playing (its not me i swear)
-
+- I recommend installing the **Calico mod**!
 
 
 # Keybinds
 > **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
 - **`F4` Key**  
-  - Opens my stamp menu executable.
+  - Opens my stamp menu executable or brings it to the front.
 
 - **`PLUS` Key (+)**  
   - Spawns a stamp at the cursor position.
@@ -107,8 +103,8 @@ If you wish to know the location of a specific canvas, please refer to the below
 ## Installation (for the peeps)
 **Ensure to not accidentally download from `Code`**
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
-2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip)
-3. Extract to `PurplePuppy-Stamps` and be careful to **not rename it**.
+2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip) or [for Linux](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps-Linux.zip)
+3. Extract to `PurplePuppy-Stamps-Linux` and be careful to **not rename it**.
 4. Download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract to `BlueberryWolfi.APIs`
 5. Place folders in `WEBFISHING/GDWeave/Mods/`
 
