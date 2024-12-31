@@ -32,9 +32,14 @@ got ctrl z to function and changed keybinds
 - better gif handling
 - faster launch times
 - completely revised launching system
+# 2.0.3
+- adding update to hopefully fix extraction issues with r2modman so download size down from 600 mb to like  200 hopefully
+- removed my awesome machine learning model (rip)
+- also like 1.11 hype (it works)
 > future updates:
-- linux version
 - improved preprocessing logic
+- chalks support
+- longer gifs and video support with potato radio for audio (cuz its funny lmao)
 - improved ctrl z logic
 - more stamps off-canvas
-- add an eraser (i quit)
+- add an eraser
