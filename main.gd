@@ -1,9 +1,9 @@
 extends Node
 
-# Preload the puppyspawn script
+
 onready var _Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new()
 var debug = false
-# API and path variables
+
 var KeybindsAPI = null
 var img_path = null
 var frames_path = null
@@ -11,30 +11,30 @@ var gui_path = null
 var data_path = null
 var cnfg_path = null
 var sent = false
-# Key states dictionary
+
 var key_states = {}
 var in_game = false
-# Define signals
+
 signal spawn_stamp
 signal open_menu
 signal _delete
 signal _play
 signal get_data
 
-# Prefix for debug messages
+
 var prefix = "[Stamps Config Handler] "
 
-# Configuration data
+
 var config_data = {}
 
 var default_config_data = {
-	"open_menu": 16777247,
-	"spawn_stamp": 61,
-	"ctrl_z": 16777220,
-	"toggle_playback": 45,
-	"gif_ready" : true,
-	"walky_talky_webfish": "nothing new!",
-	"walky_talky_menu" : "nothing new!"
+	"open_menu": 16777247, 
+	"spawn_stamp": 61, 
+	"ctrl_z": 16777220, 
+	"toggle_playback": 45, 
+	"gif_ready": true, 
+	"walky_talky_webfish": "nothing new!", 
+	"walky_talky_menu": "nothing new!"
 }
 
 func _ready():
@@ -51,34 +51,34 @@ func _ready():
 	check_updates()
 	if KeybindsAPI:
 		var open_menu_signal = KeybindsAPI.register_keybind({
-			"action_name": "open_menu",
-			"title": "Open Stamps Menu",
-			"key": config_data["open_menu"],
+			"action_name": "open_menu", 
+			"title": "Open Stamps Menu", 
+			"key": config_data["open_menu"], 
 		})
 		
 		var spawn_stamp_signal = KeybindsAPI.register_keybind({
-			"action_name": "spawn_stamp",
-			"title": "Spawn Stamp",
-			"key": config_data["spawn_stamp"],
+			"action_name": "spawn_stamp", 
+			"title": "Spawn Stamp", 
+			"key": config_data["spawn_stamp"], 
 		})
 		
 		var ctrl_z_signal = KeybindsAPI.register_keybind({
-			"action_name": "ctrl_z",
-			"title": "Stamp Ctrl Z",
-			"key": config_data["ctrl_z"],
+			"action_name": "ctrl_z", 
+			"title": "Stamp Ctrl Z", 
+			"key": config_data["ctrl_z"], 
 		})
 		
 		var toggle_playback_signal = KeybindsAPI.register_keybind({
-			"action_name": "toggle_playback",
-			"title": "Toggle Gif Playback",
-			"key": config_data["toggle_playback"],
+			"action_name": "toggle_playback", 
+			"title": "Toggle Gif Playback", 
+			"key": config_data["toggle_playback"], 
 		})
 		
-		# Connect keybind signals to their respective handlers
-		KeybindsAPI.connect(open_menu_signal, self, "_menu")  
-		KeybindsAPI.connect(spawn_stamp_signal, self, "_stamp")  
-		KeybindsAPI.connect(toggle_playback_signal, self, "_gif")  
-		KeybindsAPI.connect(ctrl_z_signal, self, "_ctrlz")  
+		
+		KeybindsAPI.connect(open_menu_signal, self, "_menu")
+		KeybindsAPI.connect(spawn_stamp_signal, self, "_stamp")
+		KeybindsAPI.connect(toggle_playback_signal, self, "_gif")
+		KeybindsAPI.connect(ctrl_z_signal, self, "_ctrlz")
 		KeybindsAPI.connect("_keybind_changed", self, "_on_keybind_changed")
 	else:
 		print("[Stamps] KeybindsAPI not found! Falling back to direct key listening.")
@@ -90,7 +90,7 @@ func _process(delta):
 	else:
 		check_key_presses()
 			
-# Function to check key presses and handle actions
+
 func check_key_presses():
 	if Input.is_key_pressed(config_data["open_menu"]):
 		handle_menu()
@@ -112,7 +112,7 @@ func check_key_presses():
 	else:
 		key_states["ctrl_z"] = false
 
-# Function to handle the "open_menu" action
+
 func handle_menu():
 	if not key_states.has("open_menu"):
 		key_states["open_menu"] = false
@@ -121,7 +121,7 @@ func handle_menu():
 		key_states["open_menu"] = true
 		_menu()
 
-# Function to handle the "spawn_stamp" action
+
 func handle_stamp():
 	if not key_states.has("spawn_stamp"):
 		key_states["spawn_stamp"] = false
@@ -130,7 +130,7 @@ func handle_stamp():
 		key_states["spawn_stamp"] = true
 		_stamp()
 		
-# Function to handle the "toggle_playback" action
+
 func handle_gif():
 	if not key_states.has("toggle_playback"):
 		key_states["toggle_playback"] = false
@@ -139,7 +139,7 @@ func handle_gif():
 		key_states["toggle_playback"] = true
 		_gif()
 
-# Function to handle the "ctrl_z" action
+
 func handle_ctrlz():
 	if not key_states.has("ctrl_z"):
 		key_states["ctrl_z"] = false
@@ -148,7 +148,7 @@ func handle_ctrlz():
 		key_states["ctrl_z"] = true
 		_ctrlz()
 
-# Function to get the GDWeave directory
+
 func _get_gdweave_dir()->String:
 	if debug:
 		return "D:/Trash/GDWeave"
@@ -163,7 +163,7 @@ func _get_gdweave_dir()->String:
 			var relative_path: = game_directory.plus_file(folder_override)
 			var is_relative: = not ":" in relative_path and Directory.new().file_exists(relative_path)
 			final_directory = relative_path if is_relative else folder_override
-		else :
+		else:
 			final_directory = game_directory.plus_file("GDWeave")
 		return final_directory
 		
@@ -177,15 +177,15 @@ func _get_frames_location()->String:
 	var config_path = gdweave_dir.plus_file("mods").plus_file("PurplePuppy-Stamps").plus_file("game_data").plus_file("current_stamp_data").plus_file("frames.txt")
 	return config_path
 
-func _get_gui_location() -> String:
+func _get_gui_location()->String:
 	var gdweave_dir = _get_gdweave_dir()
 	var executable_name = "imagePawcessor"
 	
-	# Add platform-specific file extension if needed
+	
 	if OS.get_name() == "Windows":
 		executable_name += ".exe"
 	
-	# Construct the full path
+	
 	var config_path = gdweave_dir.plus_file("mods").plus_file("PurplePuppy-Stamps").plus_file("imagePawcessor").plus_file(executable_name)
 	return config_path
 
@@ -212,24 +212,24 @@ func load_or_create_config():
 	var config_path = _get_config_location()
 	var dir = Directory.new()
 	
-	# Ensure the config directory exists
+	
 	var config_dir = _get_config_dir()
 	if not dir.dir_exists(config_dir):
 		if dir.make_dir_recursive(config_dir) == OK:
 			print(prefix, "Created config directory at: ", config_dir)
 		else:
 			print(prefix, "Failed to create config directory at: ", config_dir)
-			return
+			return 
 	
 	var file = File.new()
 	
 	if file.file_exists(config_path):
-		# Load existing config
+		
 		if file.open(config_path, File.READ) == OK:
 			var data = file.get_as_text()
 			file.close()
 			
-			# Parse the JSON data
+			
 			var json_result = JSON.parse(data)
 			if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
 				config_data = json_result.result
@@ -237,7 +237,7 @@ func load_or_create_config():
 				if config_data.size() != 7:
 					print(prefix, "Invalid Config Size, Resetting")
 					reset_config()
-				return
+				return 
 			else:
 				print(prefix, "Failed to parse config file. Using default config.")
 				config_data = default_config_data.duplicate()
@@ -245,7 +245,7 @@ func load_or_create_config():
 			print(prefix, "Failed to open config file for reading. Using default config.")
 			config_data = default_config_data.duplicate()
 	else:
-		# Create new config with default values
+		
 		config_data = default_config_data.duplicate()
 		print(prefix, "Config file created with default values at: ", config_path)
 	
@@ -258,12 +258,12 @@ func reset_config():
 	var config_path = _get_config_location()
 	var file = File.new()
 	
-	# Duplicate the default configuration to avoid modifying the original
+	
 	config_data = default_config_data.duplicate()
 	
-	# Save the default configuration back to the file
+	
 	if file.open(config_path, File.WRITE) == OK:
-		var json_string = JSON.print(config_data, "\t")
+		var json_string = JSON.print(config_data, "	")
 		file.store_string(json_string)
 		file.close()
 		print(prefix, "Configuration reset to default values.")
@@ -271,28 +271,28 @@ func reset_config():
 		print(prefix, "Failed to open config file for writing during reset.")
 		
 
-# Function to save the current config_data to the JSON file
+
 func save_config():
 	var config_path = _get_config_location()
 	var file = File.new()
 
-	# Try to open the file for writing
+	
 	if file.open(config_path, File.WRITE) == OK:
-		# Convert the config_data dictionary to a JSON string with formatting
-		var json_string = JSON.print(config_data, "\t")
+		
+		var json_string = JSON.print(config_data, "	")
 		file.store_string(json_string)
 		file.close()
 		print(prefix, "Config saved successfully to: ", config_path)
 	else:
 		print(prefix, "Failed to open config file for writing: ", config_path)
 
-# Function to get the scancode for a given action name
-func get_action_scancode(action_name: String) -> int:
+
+func get_action_scancode(action_name: String)->int:
 	if config_data.has(action_name):
 		return config_data[action_name]
 	else:
 		print(prefix, "Action name not found: ", action_name)
-		return -1
+		return - 1
 		
 
 
@@ -302,10 +302,10 @@ func check_updates():
 	var file = File.new()
 
 	while true:
-		yield(get_tree().create_timer(2.0), "timeout")
+		yield (get_tree().create_timer(2.0), "timeout")
 		
-		# Open and parse the config file
-		var needs_update = false  # Track if we need to write back to the file
+		
+		var needs_update = false
 		if file.open(config_path, File.READ) == OK:
 			var data = file.get_as_text()
 			file.close()
@@ -314,17 +314,17 @@ func check_updates():
 			if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
 				config_data = json_result.result
 
-				# Handle "walky_talky_webfish" for canvas data
+				
 				if config_data.has("walky_talky_webfish") and str(config_data["walky_talky_webfish"]) != "nothing new!":
 					var webfish_value = str(config_data["walky_talky_webfish"])
-					handle_walky_talky_webfish(webfish_value)  # Send the value to the new function
-					config_data["walky_talky_webfish"] = "nothing new!"  # Reset the value
-					needs_update = true  # Mark file for update
+					handle_walky_talky_webfish(webfish_value)
+					config_data["walky_talky_webfish"] = "nothing new!"
+					needs_update = true
 
-				# Only write back if changes are detected
+				
 				if needs_update:
 					if file.open(config_path, File.WRITE) == OK:
-						var updated_json = JSON.print(config_data, "\t")
+						var updated_json = JSON.print(config_data, "	")
 						file.store_string(updated_json)
 						file.close()
 						print(prefix, "Config file updated successfully.")
@@ -337,7 +337,7 @@ func check_updates():
 			print(prefix, "Failed to open config file.")
 			load_or_create_config()
 			
-		# Check player presence and handle spawning
+		
 		var current_scene = get_tree().current_scene
 		if current_scene == null:
 			print(prefix, "No current scene found.")
@@ -358,36 +358,36 @@ func check_updates():
 			in_game = true
 
 
-# Handle walky_talky_webfish
+
 func handle_walky_talky_webfish(value):
-	# Dictionary mapping values to function names
+	
 	var handlers = {
 		"get the canvas data bozo": "handle_get_data"
 	}
 
 	if handlers.has(value):
-		call(handlers[value])  # Call the function by its name
+		call(handlers[value])
 	else:
 		var message = "dude idk what " + str(value) + " means"
 		PlayerData._send_notification(message, 1)
 
-# Function to emit "get_data" signal or update walky_talky_menu
+
 func handle_get_data():
 	emit_signal("get_data")
 	print(prefix, "get_data signal emitted.")
 
 
-# Function to handle keybind changes
-func _on_keybind_changed(action_name: String, title: String, input_event: InputEvent) -> void:
+
+func _on_keybind_changed(action_name: String, title: String, input_event: InputEvent)->void :
 	if action_name == "":
-		return
+		return 
 	
-	# Check if the input_event is a key event
+	
 	if input_event is InputEventKey:
 		var scancode = input_event.scancode
 		print(prefix, "Action Name:", action_name, "Key Scancode:", scancode)
 		
-		# Update the config_data with the new scancode
+		
 		if config_data.has(action_name):
 			config_data[action_name] = scancode
 			save_config()

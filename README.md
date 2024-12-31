@@ -12,9 +12,9 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - Stamps are automatically adjusted to be **upright relative to the player camera**
 - In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
 - **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
-- Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` or `%appdata%/local/webfishing_stamps_mod` on Windows
+- Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%appdata%/local/webfishing_stamps_mod` on Windows
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
-- I recommend installing the **Calico mod**!
+- I recommend installing the **Calico mod**! (it can cause stuttering with gifs though)
 
 # OH NO ITS NOT LAUNCHING FROM THE GAME (LINUX ONLY)
 

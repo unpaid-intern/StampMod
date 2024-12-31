@@ -143,114 +143,6 @@ def prepare_image(img):
     img = img.copy()
     return img
 
-def remove_background(input_image, message_callback=None, model_path=None, threshold=None):
-    """
-    Process an image using the U2NET ONNX model with improved preprocessing steps.
-
-    Steps:
-    - Make a copy of the original image.
-    - Convert to RGB if not already.
-    - Apply LAB-based CLAHE for local contrast enhancement.
-    - Apply mild unsharp masking to highlight edges.
-    - Resize the enhanced copy to 512x512 (model input size).
-    - Run model inference to get a mask.
-    - Resize mask back to original size.
-    - Apply mask to original image and return.
-    """
-    import onnxruntime as ort
-    if message_callback is None:
-        message_callback = print
-
-    try:
-        # Load model path
-        model_path = exe_path_fs("imagePawcessor/exe_data/remove_bg.onnx")
-        message_callback(f"Using ONNX model at: {model_path}")
-
-        if not isinstance(input_image, Image.Image):
-            raise ValueError("Input must be a PIL.Image.Image instance.")
-
-        # Original size
-        original_width, original_height = input_image.size
-        message_callback(f"Original image mode: {input_image.mode}, size: {input_image.size}")
-
-        # Make a copy for preprocessing
-        work_image = input_image.copy()
-
-        # Ensure RGB
-        if work_image.mode != "RGB":
-            work_image = work_image.convert("RGB")
-            message_callback("Converted input image to RGB for processing.")
-
-        # ==== Preprocessing Step: LAB CLAHE ====
-        # Convert to LAB
-        work_np = np.array(work_image)
-        lab_image = cv2.cvtColor(work_np, cv2.COLOR_RGB2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab_image)
-
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        l_channel_clahe = clahe.apply(l_channel)
-
-        lab_clahe = cv2.merge((l_channel_clahe, a_channel, b_channel))
-        enhanced_rgb = cv2.cvtColor(lab_clahe, cv2.COLOR_LAB2RGB)
-        work_image = Image.fromarray(enhanced_rgb)
-
-        # ==== Preprocessing Step: Mild Unsharp Masking ====
-        work_image = work_image.filter(ImageFilter.UnsharpMask(radius=1.0, percent=150, threshold=3))
-        message_callback("Applied LAB-based CLAHE and unsharp masking for better subject clarity.")
-
-        # Resize to 512x512 for model input
-        target_size = (512, 512)
-        resized_image = work_image.resize(target_size, Image.LANCZOS)
-        message_callback(f"Resized work image to {target_size} for model inference.")
-
-        # Convert to normalized numpy array
-        img_array = np.array(resized_image).astype(np.float32) / 255.0
-        img_array = np.transpose(img_array, (2, 0, 1))  # [C, H, W]
-        img_array = np.expand_dims(img_array, axis=0)    # [1, C, H, W]
-
-        message_callback(f"Input array shape for ONNX model: {img_array.shape}")
-
-        # Run ONNX inference
-        session = ort.InferenceSession(model_path)
-        input_name = session.get_inputs()[0].name
-        outputs = session.run(None, {input_name: img_array})
-        output = outputs[0][0, 0]  # [H, W]
-
-        message_callback(f"Model output shape: {output.shape}, max value: {output.max():.3f}")
-
-        # Dynamic threshold if not provided
-        def calculate_dynamic_threshold(mask):
-            mean_value = np.mean(mask)
-            max_value = np.max(mask)
-            calculated_threshold = max(0.01, min(mean_value * 0.5, max_value * 0.5))
-            adjusted_threshold = max(0.01, calculated_threshold * 0.9 - 0.01) / 42
-            return adjusted_threshold
-
-        if threshold is None:
-            threshold = calculate_dynamic_threshold(output)
-            print(threshold)
-            message_callback(f"Dynamically adjusted threshold: {threshold:.3f}")
-
-        # Create alpha mask
-        alpha_mask = (output >= threshold).astype(np.uint8) * 255
-        alpha_mask_img = Image.fromarray(alpha_mask, mode='L')
-
-        # Resize the mask back to the original size
-        alpha_mask_resized = alpha_mask_img.resize((original_width, original_height), Image.LANCZOS)
-        message_callback("Resized alpha mask back to original image dimensions.")
-
-        # Apply the mask to the original image
-        original_rgba = input_image.convert("RGBA")
-        final_image = Image.new("RGBA", (original_width, original_height), (255, 255, 255, 0))
-        final_image.paste(original_rgba, mask=alpha_mask_resized)
-        message_callback("Applied the mask to the original image.")
-
-        return final_image
-
-    except Exception as e:
-        message_callback(f"An error occurred: {e}")
-        return input_image
-    
 
 def adjust_boost_threshold(ckey, use_lab, lab_image, hsv_image, config):
     """
@@ -1197,10 +1089,6 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
         # Prepare the image (convert to RGBA if needed)
         img = prepare_image(img)
 
-        if remove_bg:
-            if message_callback:
-                message_callback("Attemting Background Removal!")
-            img = remove_background(img, message_callback)
         # Resize the image if needed
         if target_size is not None:
             img = resize_image(img, target_size)
@@ -1719,8 +1607,7 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
             # Prepare the image (convert to RGBA if needed)
             frame = prepare_image(frame)
 
-            if remove_bg:
-                frame = remove_background(frame, message_callback)
+
             # Resize the image if needed
             if target_size is not None:
                 frame = resize_image(frame, target_size)
@@ -2049,7 +1936,7 @@ class CanvasWorker(QObject):
                 create_default_config()
                 return
             # Step 2: Monitor JSON status
-            timeout = time.time() + 4  # 4-second timeout
+            timeout = time.time() + 7  # 7-second timeout
             success = False
             previous_menu_value = "nothing new!"
 
@@ -2288,7 +2175,7 @@ class MainWindow(QMainWindow):
         self.last_message_displayed = None
         self.connected = False
         self.window_titles = [
-            "I <3 PEANITS",
+            "PEANITS",
             "are you kidding me?",
             "wOrks on My machine",
             "the hunt for purple chalk",
@@ -2297,18 +2184,23 @@ class MainWindow(QMainWindow):
             "yiff poster 9000",
             "Pupple Puppyy wuz here",
             "u,mm, Haiiii X3",
-            "neeeddd.. moooree.. .adralll ,.,",
-            "animal people",
+            "animal",
             "aaaaand its all over my screen",
-            "if ive gone missin  ive gon fishn!",
+            "if ive gone missin ive gon fishn!",
             "the world is SPINNING, SPINNING!",
             "Now with ai!",
+            "Actually i removed the ai now with no ai",
             "Full of spagetti",
             "i ated purple chalk!",
             "made by ChatGBT in just 8 minutes",
             "Fuck my chungus life",
             "Whaaatt? you dont have qhd???",
-            "hello everybody my name is welcome"
+            "hello everybody my name is welcome",
+            "Hi im a computer beep boop",
+            "whats a python???",
+            "purplepuppy more like uhh stupidpuppy gotem",
+            "Waka waka waka",
+            "This is a bucket"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
@@ -4105,6 +3997,7 @@ class MainWindow(QMainWindow):
             }}
         """)
         ring_layout.addWidget(self.bg_removal_checkbox)
+        self.bg_removal_checkbox.setVisible(False)
 
         # Custom Filter Checkbox
         self.lab_color_checkbox = QCheckBox("Use LAB Colors")
