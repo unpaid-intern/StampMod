@@ -6886,6 +6886,14 @@ def startup():
     server_thread.start()
 
     config_path = get_config_path()
+    
+    appdata_dir = get_appdata_dir()
+    saved_stamps_json = appdata_dir / "saved_stamps.json"
+
+    appdata_dir.mkdir(parents=True, exist_ok=True)
+    if not saved_stamps_json.exists():
+        initialize_saved()
+
 
     # Check if the config file exists, create it if it doesn't
     if not config_path.exists():
