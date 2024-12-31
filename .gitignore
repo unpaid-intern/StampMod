@@ -2,7 +2,11 @@
 !.gitignore
 !.gitattributes
 !imagePawcess.py
-!imagePawcessSetup.py
+!imagePawcessor/
+!imagePawcessor/imagePawcessSetup.py
+!imagePawcessor/imagePawcess.py
+!imagePawcessor/imagePawcessLinux.py
+!imagePawcessor/imagePawcessLinux.spec
 !app_icon.ico
 !puppyspawn.gd
 !main.gd
