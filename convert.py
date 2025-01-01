@@ -61,19 +61,19 @@ def main():
     # Extensions we want to handle
     valid_extensions = (".png", ".jpg", ".jpeg", ".webp")
 
-    for filename in os.listdir(current_dir):
-        file_path = os.path.join(current_dir, filename)
+    # Recursively walk through all subdirectories
+    for root, dirs, files in os.walk(current_dir):
+        for filename in files:
+            # Check if the file has a valid extension
+            if filename.lower().endswith(valid_extensions):
+                file_path = os.path.join(root, filename)
 
-        # Skip directories, focus on files with valid extensions
-        if (os.path.isfile(file_path) and 
-                filename.lower().endswith(valid_extensions)):
+                # Convert .webp to .png (if needed)
+                if filename.lower().endswith(".webp"):
+                    file_path = convert_to_png(file_path)
 
-            # Convert .webp to .png (if needed)
-            if filename.lower().endswith(".webp"):
-                file_path = convert_to_png(file_path)
-
-            # Resize the image if it's larger than 800px in any dimension
-            resize_image(file_path)
+                # Resize the image if it's larger than 800px in any dimension
+                resize_image(file_path)
 
 if __name__ == "__main__":
     main()

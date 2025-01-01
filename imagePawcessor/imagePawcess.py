@@ -4538,7 +4538,7 @@ class MainWindow(QMainWindow):
 
         self.scroll_area.verticalScrollBar().valueChanged.connect(self.load_visible_thumbnails)
         print("Lazy loading connected to scroll.")
-
+        
     def load_thumbnail_data(self):
         """
         Load thumbnail data from saved_stamps.json and cache as QPixmap objects.
@@ -4562,30 +4562,41 @@ class MainWindow(QMainWindow):
             print(f"Error reading saved_stamps.json: {e}")
             return
 
+        # Define the filenames we consider valid previews
+        valid_preview_files = ["preview.webp", "preview.png", "preview.gif"]
+
         for key, value in saved_stamps.items():
             folder_path = saved_stamps_dir / key
-            preview_path = folder_path / "preview.webp"
 
-            if preview_path.exists():
-                try:
-                    pixmap = QPixmap(str(preview_path))
-                    if not pixmap.isNull():
-                        self.thumbnail_cache[key] = pixmap
-                        self.thumbnail_data.append({
-                            "path": str(preview_path),
-                            "is_gif": value.get("is_gif", False),
-                            "key": key
-                        })
-                    else:
-                        print(f"Failed to load pixmap for {preview_path}")
-                except Exception as e:
-                    print(f"Error loading pixmap for {preview_path}: {e}")
-            else:
-                print(f"Missing preview.webp for key: {key}")
+            # Look for any valid preview file in the folder
+            found_preview_path = None
+            for filename in valid_preview_files:
+                candidate_path = folder_path / filename
+                if candidate_path.exists():
+                    found_preview_path = candidate_path
+                    break
+
+            # If no preview file is found, print a message and move on
+            if not found_preview_path:
+                print(f"Missing any valid preview file for key: {key}")
+                continue
+
+            # Try loading the found preview file into a QPixmap
+            try:
+                pixmap = QPixmap(str(found_preview_path))
+                if not pixmap.isNull():
+                    self.thumbnail_cache[key] = pixmap
+                    self.thumbnail_data.append({
+                        "path": str(found_preview_path),
+                        "is_gif": value.get("is_gif", False),
+                        "key": key
+                    })
+                else:
+                    print(f"Failed to load pixmap for {found_preview_path}")
+            except Exception as e:
+                print(f"Error loading pixmap for {found_preview_path}: {e}")
 
         print(f"Loaded {len(self.thumbnail_data)} thumbnails.")
-
-
 
 
     def handle_thumbnail_click(self, event, thumbnail_hash):
@@ -6440,12 +6451,40 @@ class MainWindow(QMainWindow):
         self.callback("saved gif" if is_gif_flag == "gif" else "saved image", center)
         if center:
             self.repopulate_grid()
-        
+
     def get_preview(self, preview_path, target_folder):
         """
         Process preview images (PNG or GIF), resize them to fit within 128x128 without warping,
         align them to the center, and save as WebP format.
         """
+
+        # 1) If the path does not exist or is a directory, try to find preview.gif or preview.png.
+        if (not preview_path.exists()) or preview_path.is_dir():
+            # Determine which folder to look into
+            folder_to_check = preview_path if preview_path.is_dir() else preview_path.parent
+            
+            # Possible preview files in that folder
+            gif_file = folder_to_check / "preview.gif"
+            png_file = folder_to_check / "preview.png"
+            webp_file = folder_to_check / "preview.webp"
+            
+            # Priority: GIF -> PNG -> (if WebP exists, do nothing) -> else error
+            if gif_file.exists():
+                preview_path = gif_file
+            elif png_file.exists():
+                preview_path = png_file
+            else:
+                # If there's already a preview.webp, we won't overwrite/change it.
+                if webp_file.exists():
+                    # Since you said it already works "perfectly" for WebP,
+                    # we just return here or do nothing further.
+                    return
+                else:
+                    raise FileNotFoundError(
+                        "No 'preview.gif', 'preview.png', or existing 'preview.webp' found."
+                    )
+
+        # 2) From here down, the code is essentially unchanged—just your original logic for PNG/GIF.
         target_file = target_folder / "preview.webp"
         output_size = (128, 128)
 
@@ -6477,18 +6516,21 @@ class MainWindow(QMainWindow):
             canvas.paste(img, (offset_x, offset_y), img)
             return canvas
 
-        if preview_path.suffix == ".png":
+        # Handle PNG
+        if preview_path.suffix.lower() == ".png":
             img = Image.open(preview_path).convert("RGBA")
             resized_img = resize_and_pad_image(img)
             resized_img.save(target_file, format="WEBP", lossless=True)
-        elif preview_path.suffix == ".gif":
+
+        # Handle GIF
+        elif preview_path.suffix.lower() == ".gif":
             original_gif = Image.open(preview_path)
             frames = []
             durations = []
 
             # Process each frame
             for frame in ImageSequence.Iterator(original_gif):
-                durations.append(frame.info.get("duration", 100))  # Default to 100 ms if no duration info
+                durations.append(frame.info.get("duration", 100))  # Default to 100ms if no duration info
                 frames.append(resize_and_pad_image(frame.convert("RGBA")))
 
             # Save the resized GIF with the original durations
@@ -6501,8 +6543,10 @@ class MainWindow(QMainWindow):
                 format="WEBP",
                 lossless=True,
             )
+
+        # If it's something else, raise an error (assuming WebP is handled elsewhere just fine).
         else:
-            raise FileNotFoundError("Invalid preview format")
+            raise FileNotFoundError("Invalid preview format or no preview file found.")
 
 def initialize_saved():
     """
@@ -6546,9 +6590,9 @@ def cleanup_saved_stamps():
     saved_stamps_dir = appdata_dir / "saved_stamps"
     saved_stamps_json = appdata_dir / "saved_stamps.json"
 
-    validated_entries = []  # List to track validated files
-    reconstructed_entries = []  # Entries reconstructed from directory
-    removed_folders = []  # List to track removed folders
+    validated_entries = []     # List to track validated files
+    reconstructed_entries = [] # Entries reconstructed from directory
+    removed_folders = []       # List to track removed folders
 
     # If the saved stamps directory is missing, initialize it
     if not saved_stamps_dir.exists():
@@ -6572,7 +6616,14 @@ def cleanup_saved_stamps():
         print("JSON file not found. Attempting reconstruction.")
 
     # Collect folders in the saved_stamps directory
-    actual_folders = {folder.name for folder in saved_stamps_dir.iterdir() if folder.is_dir()}
+    actual_folders = {
+        folder.name
+        for folder in saved_stamps_dir.iterdir()
+        if folder.is_dir()
+    }
+
+    # Define acceptable preview filenames
+    preview_filenames = ["preview.webp", "preview.gif", "preview.png"]
 
     if not json_valid:
         # JSON is missing or invalid: Reconstruct it from the existing folders
@@ -6580,9 +6631,11 @@ def cleanup_saved_stamps():
         for folder_name in actual_folders:
             folder_path = saved_stamps_dir / folder_name
             stamp_txt_path = folder_path / "stamp.txt"
-            preview_webp_path = folder_path / "preview.webp"
 
-            if stamp_txt_path.exists() and preview_webp_path.exists():
+            # Check if any of the acceptable previews exist
+            has_preview = any((folder_path / fname).exists() for fname in preview_filenames)
+
+            if stamp_txt_path.exists() and has_preview:
                 # Check for "frames.txt" to determine if it is a GIF
                 is_gif = (folder_path / "frames.txt").exists()
                 saved_stamps[folder_name] = {"is_gif": is_gif}
@@ -6615,10 +6668,12 @@ def cleanup_saved_stamps():
             if not folder_path.exists():
                 continue  # Skip non-existent folders
 
-            # Ensure required files exist
             stamp_txt_path = folder_path / "stamp.txt"
-            preview_webp_path = folder_path / "preview.webp"
-            if stamp_txt_path.exists() and preview_webp_path.exists():
+            # Check if any acceptable preview exists
+            has_preview = any((folder_path / fname).exists() for fname in preview_filenames)
+
+            # If the required files exist, mark as validated; otherwise remove
+            if stamp_txt_path.exists() and has_preview:
                 validated_entries.append(folder_name)
             else:
                 # Remove invalid folders
@@ -6642,8 +6697,7 @@ def cleanup_saved_stamps():
 
     print("\nRemoved Folders:")
     print(removed_folders if removed_folders else "No folders removed.")
-
-
+    
 def create_default_config():
     """
     Create a default JSON configuration file at the given path.

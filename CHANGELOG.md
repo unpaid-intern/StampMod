@@ -36,6 +36,10 @@ got ctrl z to function and changed keybinds
 - adding update to hopefully fix extraction issues with r2modman so download size down from 600 mb to like  200 hopefully
 - removed my awesome machine learning model (rip)
 - also like 1.11 hype (it works)
+# 2.0.4 
+- bugfix for off canvas images over 200*200
+# 2.0.5 
+- compatability with the stupid fucking knockoff of r2modman (the thunderstore overwolf mod manager that cant fucking extract webp images fuck you) please if you arent a robot use r2modman instead wtffffffff like it works now but still
 > future updates:
 - improved preprocessing logic
 - chalks support
