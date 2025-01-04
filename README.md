@@ -2,7 +2,7 @@
 A stamp and art saving mod for for WEBFISHING using GDWeave
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/unpaid-intern/StampMod/770275baa838ab549dc661654ebc0338806b421f/menu_gif.gif" alt="kitty campfire"/>
+  <img src="https://raw.githubusercontent.com/unpaid-intern/StampMod/main/menu_gif.gif" alt="kitty campfire"/>
 </p>
 
 
