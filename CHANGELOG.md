@@ -45,7 +45,9 @@ got ctrl z to function and changed keybinds
 # 2.1.0
 - improved preprocessing logic
 - chalks support
+- adds grass and canvas to color options
 - gif playback speed options
+- took boost and threshold options away from the user because the user cannot be trusted to make competent decisions, done automatically now.
 
 > future updates:
 - better organised save menu and saved stamp sharing

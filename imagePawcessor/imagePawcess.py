@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QCheckBox, QSlider, QComboBox,
     QProgressBar, QMessageBox, QStackedWidget, QLineEdit, QSizePolicy,
-    QFormLayout, QGridLayout, QSpacerItem, QFrame, QStackedLayout, QScrollArea
+    QFormLayout, QGridLayout, QSpacerItem, QFrame, QStackedLayout, QScrollArea, QGroupBox
 )
 from PySide6.QtGui import (
     QPixmap, QMovie, QIcon, QPainter, QCursor, QImage, QPen, QKeySequence, QShortcut
@@ -2250,7 +2250,9 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
     mid_point = 0.5
     lower_bound = -0.53
     upper_bound = 1.53
-
+    global chalks_colors
+    chalks_colors = remove_bg
+    print(chalks_colors)
     # Calculate the delta
     delta = brightness_flag - mid_point
 
@@ -2738,7 +2740,8 @@ class MainWindow(QMainWindow):
             "whats a python???",
             "purplepuppy more like uhh stupidpuppy gotem",
             "Waka waka waka",
-            "This is a bucket"
+            "This is a bucket",
+            "bork meooow"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
@@ -4374,399 +4377,477 @@ class MainWindow(QMainWindow):
         self.gif_frames = None
         self.gif_durations = None
         self.current_frame = None
-
-    def setup_secondary_menu(self):
-        """
-        Sets up the secondary menu with the corrected layout:
-        - Image container on the left without any black borders around the image.
-        - Checkboxes and sliders to the right of the image box in a vertical column.
-        - Process button and accompanying elements fixed at the bottom.
-        """
-
-        # Secondary widget
-        self.secondary_widget = QWidget()
-        secondary_layout = QVBoxLayout()  # Main vertical layout
-        secondary_layout.setContentsMargins(10, 10, 10, 10)
-        self.secondary_widget.setLayout(secondary_layout)
-
-        # Top horizontal layout for image and checkboxes
-        top_layout = QHBoxLayout()
-# Back button with small black border
-        # Image container without background
-        image_container = QFrame()
-        image_container.setStyleSheet("background-color: transparent;")  # Remove background
-        image_container.setFixedSize(420, 300)  # Frame is the same size as the image
-
-        # Stack layout for image and back button
-        image_layout = QStackedLayout()
-        image_container.setLayout(image_layout)
-
-        # Image label
-        self.image_label = QLabel("Whoops Sorry haha")
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setStyleSheet("background-color: transparent; border: none;")  # Ensure no black border
-        self.image_label.setFixedSize(420, 300)  # Exact size for the image
-        image_layout.addWidget(self.image_label)
-
-        # Back button with small black border
-        self.back_button = QPushButton(self)
-        self.back_button.setStyleSheet(f"""
-            QPushButton {{
-                border: none; 
-                background-color: transparent;
-                image: url({exe_path_str('imagePawcessor/font_stuff/home.svg')});
-            }}
-            QPushButton:hover {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/home_hover.svg')});
-            }}    
-            QPushButton:pressed {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/home_hover.svg')});
-            }}
-        """)
-
-        self.back_button.setFixedSize(60, 60)  # Ensure consistent size
-        self.back_button.setCursor(Qt.PointingHandCursor)
-        self.back_button.clicked.connect(self.go_to_initial_menu)
-        self.back_button.move(-5, -9)
-        self.back_button.show()
-        self.back_button.raise_()
-        image_layout.addWidget(self.back_button)
-        # Refresh button 60px to the right of the back button
-        self.refresh_button = QPushButton(self)
-        self.refresh_button.setStyleSheet(f"""
-            QPushButton {{
-                border: none; /* Remove any borders */
-                background-color: transparent; 
-                image: url({exe_path_str('imagePawcessor/font_stuff/refresh.svg')});
-            }}
-            QPushButton:hover {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/refresh_hover.svg')});
-            }}    
-            QPushButton:pressed {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/refresh_hover.svg')});
-            }}       
-        """)
-        self.refresh_button.setFixedSize(60, 60)  # Ensure consistent size
-        self.refresh_button.setCursor(Qt.PointingHandCursor)
-        self.refresh_button.clicked.connect(self.reset_color_options)
-        self.refresh_button.move(self.back_button.x() + 50, self.back_button.y())  # Positioned 60px to the right
-        self.refresh_button.show()
-        self.refresh_button.raise_()
-        image_layout.addWidget(self.refresh_button)
-        # Add the image container to the layout
-        top_layout.addWidget(image_container)
-
-                # Ring-style frame to wrap all options
-        # Ring-style frame to wrap all options
-        ring_frame = QFrame()
-        ring_frame.setStyleSheet("""
-            QFrame {
-                border: 3px solid #7b1fa2; /* Purple border */
-                border-radius: 15px;      /* Rounded corners */
-                padding: 5px;             /* Reduced inner padding */
-                margin: 0px;              /* Outer margin */
-                background-color: transparent;
-            }
-        """)
-
-        # Layout inside the ring frame
-        ring_layout = QVBoxLayout()
-        ring_layout.setContentsMargins(5, 5, 5, 5)  # Optional: Reduce if needed
-        ring_layout.setSpacing(10)  # Reduced spacing between elements
-        ring_frame.setLayout(ring_layout)
-
-        # Title for the preprocess options
-        title_label = QLabel("Processing Options")
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 20px;
-                font-weight: bold;
-                margin: 0px;  /* No extra spacing */
-                border: none; /* No border */
-                background: none; /* Transparent background */
-            }
-        """)
-        ring_layout.addWidget(title_label)
-
-        # Preprocess Image checkbox
-        self.preprocess_checkbox = QCheckBox("Preprocess Image")
-        self.preprocess_checkbox.setChecked(True)
-        self.preprocess_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: 16px;
-                color: white;
-                border: none; /* No border */
-                background: none; /* Transparent background */
-                margin: 0px; /* No margin */
-            }}
-            QCheckBox::indicator {{
-                width: 24px;
-                height: 24px;
-            }}
-            QCheckBox::indicator:unchecked {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
-            }}
-            QCheckBox::indicator:checked {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
-            }}
-        """)
-        ring_layout.addWidget(self.preprocess_checkbox)
-
-        # AI Background Removal Checkbox
-        self.bg_removal_checkbox = QCheckBox("Background Removal")
-        self.bg_removal_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: 16px;
-                color: white;
-                border: none; /* No border */
-                background: none; /* Transparent background */
-                margin: 0px; /* No margin */
-            }}
-            QCheckBox::indicator {{
-                width: 24px;
-                height: 24px;
-            }}
-            QCheckBox::indicator:unchecked {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
-            }}
-            QCheckBox::indicator:checked {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
-            }}
-        """)
-        ring_layout.addWidget(self.bg_removal_checkbox)
-        self.bg_removal_checkbox.setVisible(False)
-
-        # Custom Filter Checkbox
-        self.lab_color_checkbox = QCheckBox("Use LAB Colors")
-        self.lab_color_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                font-size: 16px;
-                color: white;
-                border: none; /* No border */
-                background: none; /* Transparent background */
-                margin: 0px; /* No margin */
-            }}
-            QCheckBox::indicator {{
-                width: 24px;
-                height: 24px;
-            }}
-            QCheckBox::indicator:unchecked {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
-            }}
-            QCheckBox::indicator:checked {{
-                image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
-            }}
-        """)
-        ring_layout.addWidget(self.lab_color_checkbox)
-
-        # Brightness Layout
-        brightness_layout = QHBoxLayout()
-        brightness_layout.setContentsMargins(0, 0, 0, 0)
-        brightness_layout.setSpacing(2)  # Reduced spacing
-        self.brightness_label = QLabel("Brightness")
-        self.brightness_label.setAlignment(Qt.AlignCenter)
-        self.brightness_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 16px; /* Larger text */
-                font-weight: bold;
-                border: none; /* No ring */
-                margin-bottom: 2px; /* Reduced margin below the label */
-            }
-        """)
-        brightness_layout.addWidget(self.brightness_label)
-
-        # Brightness Slider
-        self.brightness_slider = QSlider(Qt.Orientation.Horizontal)
-        self.brightness_slider.setRange(-53, 153)
-        self.brightness_slider.setValue(86)
-        self.brightness_slider.setTickInterval(1)
-        self.brightness_slider.setStyleSheet("""
-            QSlider::groove:horizontal {
-                height: 6px;
-                background: #7b1fa2;
-                border-radius: 3px;
-                margin: 0px; /* Remove any default margins */
-            }
-            QSlider::handle:horizontal {
-                background: #ffffff;
-                border: 1px solid #7b1fa2;
-                width: 14px;
-                margin: -5px 0; /* Adjust handle position */
-                border-radius: 7px;
-            }
-        """)
-        brightness_layout.addWidget(self.brightness_slider)
-
-        # Add the brightness layout to the main ring layout
-        ring_layout.addLayout(brightness_layout)
-
-        # Processing Method title
-        processing_label = QLabel("Processing Method:")
-        processing_label.setAlignment(Qt.AlignTop | Qt.AlignCenter) 
-        processing_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 17px;
-                font-weight: bold;
-                border: none;
-                margin-bottom: 2px; /* Minimal bottom margin */
-                padding-bottom: 0px; /* Minimal bottom padding */
-            }
-        """)
-        ring_layout.addWidget(processing_label)
-
-        # Retrieve processing methods from imageprocess
-        self.processing_methods = [
-            {"name": name, "description": getattr(func, "description", "")}
-            for name, func in processing_method_registry.items()
-        ]
-        self.processing_combobox = QComboBox()
-        self.processing_combobox.addItems([method["name"] for method in self.processing_methods])
-        self.processing_combobox.setStyleSheet("""
-            QComboBox {
-                background-color: #7b1fa2;
-                color: white;
-                border-radius: 5px;
-                font-family: 'Comic Sans MS', sans-serif;
-                font-size: 16px;
-                font-weight: bold;
-                padding: 5px;
-                margin: 0px; /* No margin */
-            }
-            QComboBox:hover {
-                background-color: #9c27b0;
-            }
-            QComboBox::drop-down {
-                border-radius: 0px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #7b1fa2;
-                color: white;
-                selection-background-color: #9c27b0;
-            }
-        """)
-        ring_layout.addWidget(self.processing_combobox)
-        self.processing_combobox.currentTextChanged.connect(self.processing_method_changed)
     
-        # Final adjustments
-        ring_frame.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
-        ring_frame.setMaximumSize(256, 1000)
-        # Add the ring frame to the top layout (to the right of the image)
-        top_layout.addWidget(ring_frame, alignment=Qt.AlignBottom)
+    def setup_secondary_menu(self):
+            """
+            Sets up the secondary menu with the corrected layout:
+            - Image container on the left without any black borders around the image.
+            - Checkboxes and sliders to the right of the image box in a vertical column.
+            - Process button and accompanying elements fixed at the bottom.
+            """
+
+            # Secondary widget
+            self.secondary_widget = QWidget()
+            secondary_layout = QVBoxLayout()  # Main vertical layout
+            secondary_layout.setContentsMargins(10, 10, 10, 10)
+            self.secondary_widget.setLayout(secondary_layout)
+
+            # Top horizontal layout for image and checkboxes
+            top_layout = QHBoxLayout()
+
+            # Image container without background
+            image_container = QFrame()
+            image_container.setStyleSheet("background-color: transparent;")  # Remove background
+            image_container.setFixedSize(420, 300)  # Frame is the same size as the image
+
+            # Stack layout for image and back button
+            image_layout = QStackedLayout()
+            image_container.setLayout(image_layout)
+
+            # Image label
+            self.image_label = QLabel("Whoops Sorry haha")
+            self.image_label.setAlignment(Qt.AlignCenter)
+            self.image_label.setStyleSheet("background-color: transparent; border: none;")
+            self.image_label.setFixedSize(420, 300)
+            image_layout.addWidget(self.image_label)
+
+            # Back button
+            self.back_button = QPushButton(self)
+            self.back_button.setStyleSheet(f"""
+                QPushButton {{
+                    border: none; 
+                    background-color: transparent;
+                    image: url({exe_path_str('imagePawcessor/font_stuff/home.svg')});
+                }}
+                QPushButton:hover {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/home_hover.svg')});
+                }}    
+                QPushButton:pressed {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/home_hover.svg')});
+                }}
+            """)
+            self.back_button.setFixedSize(60, 60)
+            self.back_button.setCursor(Qt.PointingHandCursor)
+            self.back_button.clicked.connect(self.go_to_initial_menu)
+            self.back_button.move(-5, -9)
+            self.back_button.show()
+            self.back_button.raise_()
+            image_layout.addWidget(self.back_button)
+
+            # Refresh button 60px to the right of the back button
+            self.refresh_button = QPushButton(self)
+            self.refresh_button.setStyleSheet(f"""
+                QPushButton {{
+                    border: none;
+                    background-color: transparent; 
+                    image: url({exe_path_str('imagePawcessor/font_stuff/refresh.svg')});
+                }}
+                QPushButton:hover {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/refresh_hover.svg')});
+                }}    
+                QPushButton:pressed {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/refresh_hover.svg')});
+                }}       
+            """)
+            self.refresh_button.setFixedSize(60, 60)
+            self.refresh_button.setCursor(Qt.PointingHandCursor)
+            self.refresh_button.clicked.connect(self.reset_color_options)
+            self.refresh_button.move(self.back_button.x() + 50, self.back_button.y())
+            self.refresh_button.show()
+            self.refresh_button.raise_()
+            image_layout.addWidget(self.refresh_button)
+
+            top_layout.addWidget(image_container)
+
+            # Ring-style frame to wrap all options
+            ring_frame = QFrame()
+            ring_frame.setStyleSheet("""
+                QFrame {
+                    border: 3px solid #7b1fa2; /* Purple border */
+                    border-radius: 15px;
+                    padding: 5px;
+                    margin: 0px;
+                    background-color: transparent;
+                }
+            """)
+            ring_layout = QVBoxLayout()
+            ring_layout.setContentsMargins(5, 5, 5, 5)
+            ring_layout.setSpacing(5)
+            ring_frame.setLayout(ring_layout)
+
+            # Title
+            title_label = QLabel("Processing Options")
+            title_label.setAlignment(Qt.AlignCenter)
+            title_label.setStyleSheet("""
+                QLabel {
+                    color: white;
+                    font-size: 20px;
+                    font-weight: bold;
+                    margin: 0px;
+                    border: none;
+                    background: none;
+                }
+            """)
+            ring_layout.addWidget(title_label)
+
+            # Preprocess checkbox
+            self.preprocess_checkbox = QCheckBox("Preprocess Image")
+            self.preprocess_checkbox.setChecked(True)
+            self.preprocess_checkbox.setStyleSheet(f"""
+                QCheckBox {{
+                    font-size: 16px;
+                    color: white;
+                    border: none;
+                    background: none;
+                    margin: 0px;
+                }}
+                QCheckBox::indicator {{
+                    width: 24px;
+                    height: 24px;
+                }}
+                QCheckBox::indicator:unchecked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
+                }}
+                QCheckBox::indicator:checked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
+                }}
+            """)
+            ring_layout.addWidget(self.preprocess_checkbox)
+
+            # LAB Colors checkbox
+            self.lab_color_checkbox = QCheckBox("Use LAB Colors")
+            self.lab_color_checkbox.setStyleSheet(f"""
+                QCheckBox {{
+                    font-size: 16px;
+                    color: white;
+                    border: none;
+                    background: none;
+                    margin: 0px;
+                }}
+                QCheckBox::indicator {{
+                    width: 24px;
+                    height: 24px;
+                }}
+                QCheckBox::indicator:unchecked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
+                }}
+                QCheckBox::indicator:checked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
+                }}
+            """)
+            ring_layout.addWidget(self.lab_color_checkbox)
+
+            # Placing on Canvas
+            self.oncanvascheckbox = QCheckBox("Placing on Canvas")
+            self.oncanvascheckbox.setStyleSheet(f"""
+                QCheckBox {{
+                    font-size: 16px;
+                    color: white;
+                    border: none;
+                    background: none;
+                    margin: 0px;
+                }}
+                QCheckBox::indicator {{
+                    width: 24px;
+                    height: 24px;
+                }}
+                QCheckBox::indicator:unchecked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
+                }}
+                QCheckBox::indicator:checked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
+                }}
+            """)
+            ring_layout.addWidget(self.oncanvascheckbox)
+
+            # Placing on Grass
+            self.ongrasscheckbox = QCheckBox("Placing on Grass")
+            self.ongrasscheckbox.setStyleSheet(f"""
+                QCheckBox {{
+                    font-size: 16px;
+                    color: white;
+                    border: none;
+                    background: none;
+                    margin: 0px;
+                }}
+                QCheckBox::indicator {{
+                    width: 24px;
+                    height: 24px;
+                }}
+                QCheckBox::indicator:unchecked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
+                }}
+                QCheckBox::indicator:checked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
+                }}
+            """)
+            ring_layout.addWidget(self.ongrasscheckbox)
+
+            # Chalks (client side)
+            self.bg_removal_checkbox = QCheckBox("Use Chalks (client side)")
+            self.bg_removal_checkbox.setStyleSheet(f"""
+                QCheckBox {{
+                    font-size: 16px;
+                    color: white;
+                    border: none;
+                    background: none;
+                    margin: 0px;
+                }}
+                QCheckBox::indicator {{
+                    width: 24px;
+                    height: 24px;
+                }}
+                QCheckBox::indicator:unchecked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/uncheck.svg')});
+                }}
+                QCheckBox::indicator:checked {{
+                    image: url({exe_path_str('imagePawcessor/font_stuff/check.svg')});
+                }}
+            """)
+            ring_layout.addWidget(self.bg_removal_checkbox)
+
+            global has_chalks
+            if not has_chalks:
+                self.bg_removal_checkbox.setVisible(False)
+
+            # Processing Method label + combobox
+            processing_label = QLabel("Processing Method:")
+            processing_label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+            processing_label.setStyleSheet("""
+                QLabel {
+                    color: white;
+                    font-size: 17px;
+                    font-weight: bold;
+                    border: none;
+                    margin-bottom: 2px;
+                    padding-bottom: 0px;
+                }
+            """)
+            ring_layout.addWidget(processing_label)
+
+            self.processing_methods = [
+                {"name": name, "description": getattr(func, "description", "")}
+                for name, func in processing_method_registry.items()
+            ]
+            self.processing_combobox = QComboBox()
+            self.processing_combobox.addItems([method["name"] for method in self.processing_methods])
+            self.processing_combobox.setStyleSheet("""
+                QComboBox {
+                    background-color: #7b1fa2;
+                    color: white;
+                    border-radius: 5px;
+                    font-family: 'Comic Sans MS', sans-serif;
+                    font-size: 16px;
+                    font-weight: bold;
+                    padding: 5px;
+                    margin: 0px;
+                }
+                QComboBox:hover {
+                    background-color: #9c27b0;
+                }
+                QComboBox::drop-down {
+                    border-radius: 0px;
+                }
+                QComboBox QAbstractItemView {
+                    background-color: #7b1fa2;
+                    color: white;
+                    selection-background-color: #9c27b0;
+                }
+            """)
+            self.processing_combobox.currentTextChanged.connect(self.processing_method_changed)
+            ring_layout.addWidget(self.processing_combobox)
+
+            ring_frame.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+            ring_frame.setMaximumSize(256, 1000)
+
+            # Add the ring frame to the top layout
+            top_layout.addWidget(ring_frame, alignment=Qt.AlignBottom)
+
+            # Add the top layout (image + checkboxes) to the main layout
+            secondary_layout.addLayout(top_layout)
+
+            # Group/box to hold description box + brightness & resize controls
+            from PySide6.QtWidgets import QGroupBox, QTextEdit
+            sliders_group_box = QGroupBox()
+            sliders_group_layout = QVBoxLayout()
+            sliders_group_box.setLayout(sliders_group_layout)
+            sliders_group_box.setStyleSheet("QGroupBox { border: none; }")
+
+            # The description box (read-only, bigger bold Comic Sans, arrow cursor)
+            self.blank = QTextEdit()
+            self.blank.setStyleSheet("""
+                QTextEdit {
+                    background-color: #4A148C;
+                    color: white;
+                    font-size: 16px; 
+                    font-weight: bold;
+                    font-family: "Comic Sans MS", sans-serif;
+                    border-radius: 8px;
+                    padding: 8px;
+                }
+            """)
+            self.blank.setReadOnly(True)
+            self.blank.setCursor(Qt.ArrowCursor)
+            self.blank.setMinimumHeight(40)
+            self.blank.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.blank.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.blank.setPlainText("Sample description text here...")
+
+            sliders_group_layout.addWidget(self.blank)
+
+            # Small spacer
+            sliders_group_layout.addSpacing(8)
+
+            # Resize (max dim)
+            resize_layout = QHBoxLayout()
+            resize_layout.setSpacing(10)
+            resize_label = QLabel("Resize (max dim):")
+            resize_label.setAlignment(Qt.AlignTop)
+            resize_layout.addWidget(resize_label, alignment=Qt.AlignTop)
+
+            self.resize_slider = QSlider(Qt.Horizontal)
+            self.resize_slider.setRange(6, 400)
+            self.resize_slider.setValue(128)
+            self.resize_slider.setTickInterval(10)
+            self.resize_slider.setTickPosition(QSlider.TicksBelow)
+            resize_layout.addWidget(self.resize_slider, alignment=Qt.AlignTop)
+
+            self.resize_value_label = QLabel("128")
+            self.resize_value_label.setAlignment(Qt.AlignTop)
+            resize_layout.addWidget(self.resize_value_label, alignment=Qt.AlignTop)
+
+            self.resize_slider.valueChanged.connect(self.resize_slider_changed)
+            sliders_group_layout.addLayout(resize_layout)
+
+            # Brightness
+            self.method_options_layout = QFormLayout()
+            method_options_widget = QWidget()
+            method_options_widget_layout = QVBoxLayout()
+            method_options_widget_layout.setAlignment(Qt.AlignTop)
+            method_options_widget_layout.setContentsMargins(0, 0, 0, 0)
+            method_options_widget.setLayout(method_options_widget_layout)
+
+            brightness_layout = QHBoxLayout()
+            brightness_layout.setSpacing(10)
+
+            self.brightness_label = QLabel("Brightness:")
+            self.brightness_label.setAlignment(Qt.AlignTop)
+            brightness_layout.addWidget(self.brightness_label, alignment=Qt.AlignTop)
+
+            self.brightness_slider = QSlider(Qt.Horizontal)
+            self.brightness_slider.setRange(-53, 153)
+            self.brightness_slider.setValue(86)
+            self.brightness_slider.setTickInterval(1)
+            brightness_layout.addWidget(self.brightness_slider, alignment=Qt.AlignTop)
+
+            # Just like resize, add a value label for brightness
+            self.brightness_value_label = QLabel(str(self.brightness_slider.value()))
+            self.brightness_value_label.setAlignment(Qt.AlignTop)
+            brightness_layout.addWidget(self.brightness_value_label, alignment=Qt.AlignTop)
+
+            # Connect brightness slider to update label
+            self.brightness_slider.valueChanged.connect(lambda v: self.brightness_value_label.setText(str(v)))
+
+            method_options_widget_layout.addLayout(brightness_layout)
+            method_options_widget_layout.addLayout(self.method_options_layout)
+
+            sliders_group_layout.addWidget(method_options_widget)
+
+            # Add this sliders group box to the main layout
+            secondary_layout.addWidget(sliders_group_box)
+
+            # Initialize parameter widgets
+            self.parameter_widgets = {}
+
+            # Color options
+            self.setup_color_options_ui(secondary_layout)
+
+            # Initially populate method options
+            self.processing_method_changed('self.processing_combobox.currentText()')
+
+            # Action layout for process button, status label, and progress bar
+            self.action_layout = QStackedWidget()
+
+            # Process button
+            self.process_button = QPushButton("Yeaaah Process it!")
+            self.process_button.setStyleSheet("""
+                QPushButton {
+                    background-color: qlineargradient(
+                        spread:pad, x1:0, y1:0, x2:1, y2:1, 
+                        stop:0 #7b1fa2, stop:1 #9c27b0);
+                    color: white;
+                    border-radius: 15px;
+                    font-family: 'Comic Sans MS', sans-serif;
+                    font-size: 24px;
+                    font-weight: bold;
+                    padding: 15px 30px;
+                }
+                QPushButton:hover {
+                    background-color: qlineargradient(
+                        spread:pad, x1:0, y1:0, x2:1, y2:1, 
+                        stop:0 #9c27b0, stop:1 #d81b60);
+                }
+                QPushButton:pressed {
+                    background-color: qlineargradient(
+                        spread:pad, x1:0, y1:0, x2:1, y2:1, 
+                        stop:0 #6a0080, stop:1 #880e4f);
+                }
+            """)
+            self.process_button.setMinimumHeight(60)
+            self.process_button.setCursor(Qt.PointingHandCursor)
+            self.process_button.clicked.connect(self.process_image)
+            self.action_layout.addWidget(self.process_button)
+
+            # Status layout with status label and progress bar
+            status_widget = QWidget()
+            status_layout = QVBoxLayout()
+            status_widget.setLayout(status_layout)
+
+            self.status_label = QLabel("Status: Ready")
+            self.status_label.setAlignment(Qt.AlignCenter)
+            self.status_label.setVisible(False)
+            status_layout.addWidget(self.status_label)
+
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setMaximumHeight(20)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setVisible(False)
+            status_layout.addWidget(self.progress_bar)
+
+            self.action_layout.addWidget(status_widget)
+
+            # Add the action layout at the bottom
+            process_widget = QWidget()
+            process_layout = QVBoxLayout()
+            process_layout.addWidget(self.action_layout)
+            process_widget.setLayout(process_layout)
+            process_widget.setFixedHeight(80)
+            secondary_layout.addWidget(process_widget, alignment=Qt.AlignBottom)
+
+            # Add the secondary widget to the stacked widget
+            self.stacked_widget.addWidget(self.secondary_widget)
+
+            # Finally, set up the exclusivity for Grass/Canvas
+            self.make_placement_exclusive()
 
 
+    def make_placement_exclusive(self):
+        """
+        Ensures that only one of 'Placing on Grass' or 'Placing on Canvas' can be checked.
+        Checking one will uncheck the other if it's checked.
+        """
+        self.oncanvascheckbox.stateChanged.connect(self._grass_canvas_exclusive)
+        self.ongrasscheckbox.stateChanged.connect(self._grass_canvas_exclusive)
 
-        # Add the top layout (image + checkboxes) to the main layout
-        secondary_layout.addLayout(top_layout)
+    def _grass_canvas_exclusive(self):
+        """ Helper slot to enforce exclusivity between Grass & Canvas checkboxes. """
+        # If 'Placing on Canvas' was just checked, uncheck 'Placing on Grass'
+        if self.sender() == self.oncanvascheckbox and self.oncanvascheckbox.isChecked():
+            self.ongrasscheckbox.setChecked(False)
 
-        # Resize options
-        resize_layout = QHBoxLayout()
-        resize_layout.setSpacing(10)
-        secondary_layout.addLayout(resize_layout)
-
-        resize_label = QLabel("Resize (max dim):")
-        resize_layout.addWidget(resize_label, alignment=Qt.AlignTop)
-
-        self.resize_slider = QSlider(Qt.Horizontal)
-        self.resize_slider.setRange(6, 400)
-        self.resize_slider.setValue(128)
-        self.resize_slider.setTickInterval(10)
-        self.resize_slider.setTickPosition(QSlider.TicksBelow)
-        resize_layout.addWidget(self.resize_slider, alignment=Qt.AlignTop)
-
-        self.resize_value_label = QLabel("128")
-        resize_layout.addWidget(self.resize_value_label, alignment=Qt.AlignTop)
-
-        self.resize_slider.valueChanged.connect(self.resize_slider_changed)
-
-        self.method_options_layout = QFormLayout()
-        # Wrapper widget to ensure top alignment for the method options layout
-        method_options_widget = QWidget()
-        method_options_widget_layout = QVBoxLayout()
-        method_options_widget_layout.setAlignment(Qt.AlignTop)  # Align top
-        method_options_widget_layout.setContentsMargins(0, 0, 0, 0)  # Remove extra margins
-        method_options_widget.setLayout(method_options_widget_layout)
-
-        # Add the method options layout to the wrapper layout
-        method_options_widget_layout.addLayout(self.method_options_layout)
-
-        # Add the wrapper widget to the secondary layout
-        secondary_layout.addWidget(method_options_widget)
-
-
-        # Initialize parameter widgets
-        self.parameter_widgets = {}
-
-        # Color options
-        self.setup_color_options_ui(secondary_layout)
-
-        # Initially populate method options
-        self.processing_method_changed('self.processing_combobox.currentText()')
-
-        # Action layout for process button, status label, and progress bar
-        self.action_layout = QStackedWidget()
-
-        # Process button
-        self.process_button = QPushButton("Yeaaah Process it!")
-        self.process_button.setStyleSheet("""
-            QPushButton {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #7b1fa2, stop:1 #9c27b0);
-                color: white;
-                border-radius: 15px;  /* Rounded corners */
-                font-family: 'Comic Sans MS', sans-serif;
-                font-size: 24px;
-                font-weight: bold;
-                padding: 15px 30px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #9c27b0, stop:1 #d81b60);
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #6a0080, stop:1 #880e4f);
-            }
-        """)
-        self.process_button.setMinimumHeight(60)
-        self.process_button.setCursor(Qt.PointingHandCursor)
-        self.process_button.clicked.connect(self.process_image)
-        self.action_layout.addWidget(self.process_button)
-
-        # Status layout with status label and progress bar
-        status_widget = QWidget()
-        status_layout = QVBoxLayout()
-        status_widget.setLayout(status_layout)
-
-        self.status_label = QLabel("Status: Ready")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setVisible(False)
-        status_layout.addWidget(self.status_label)
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximumHeight(20)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setVisible(False)
-        status_layout.addWidget(self.progress_bar)
-
-        self.action_layout.addWidget(status_widget)
-
-        # Add the action layout and force alignment at the bottom
-        process_widget = QWidget()
-        process_layout = QVBoxLayout()
-        process_layout.addWidget(self.action_layout)
-        process_widget.setLayout(process_layout)
-        process_widget.setFixedHeight(80)
-        secondary_layout.addWidget(process_widget, alignment=Qt.AlignBottom)
-
-        # Add the secondary widget to the stacked widget
-        self.stacked_widget.addWidget(self.secondary_widget)
+        # If 'Placing on Grass' was just checked, uncheck 'Placing on Canvas'
+        if self.sender() == self.ongrasscheckbox and self.ongrasscheckbox.isChecked():
+            self.oncanvascheckbox.setChecked(False)
 
 
     def setup_result_menu(self):
@@ -5954,6 +6035,8 @@ class MainWindow(QMainWindow):
                 self.threshold_sliders[color_number].setVisible(False)
 
         self.brightness_slider.setValue(86)
+        self.manual_change = False
+        self.resize_slider_changed(self.resize_slider.value())
 
     def lab_value_toggle(self, checked):
         for color_number in self.boost_labels:
@@ -5980,6 +6063,8 @@ class MainWindow(QMainWindow):
                     self.threshold_sliders[color_number].setValue(28)
                 
                 self.brightness_slider.setValue(16)
+
+
 
 
 
@@ -6310,14 +6395,12 @@ class MainWindow(QMainWindow):
         self.image_label.setStyleSheet("background-color: transparent; border: none;")  # Ensure no black border
 
             
-    def processing_method_changed(self, method_name, strength = False, manual = True):
-        
+    def processing_method_changed(self, method_name, strength=False, manual=True):
         """
         Updates the parameter input UI dynamically when the processing method is changed.
         Handles descriptions and ensures compatibility with the new decorator structure.
         """
         # Clear existing parameter widgets
-        # Clear existing parameter widgets completely
         while self.method_options_layout.rowCount() > 0:
             self.method_options_layout.removeRow(0)
         self.parameter_widgets.clear()
@@ -6327,29 +6410,12 @@ class MainWindow(QMainWindow):
         if not processing_function:
             return
 
-        # Retrieve the description and display it if needed
+        # Retrieve and display the description, if any, in self.blank
         method_description = getattr(processing_function, "description", "")
         if method_description:
-            #self.description_box.setText(method_description)
-            # Description Box
-            #self.description_box = QLabel()
-            #self.description_box.setStyleSheet("""
-            #    QLabel {
-            #        color: white; /* White text color */
-            #        font-size: 13px; /* Normal font size */
-            #        background: transparent; /* No background */
-            #        border: none; /* No border */
-            #        padding: 0px; /* Minimal padding */
-            #        margin: 0px; /* Minimal margin */
-            #        text-align: left; /* Align text to the left */
-            #    }
-            #""")
-            #self.description_box.setWordWrap(True)  # Enable text wrapping for multiline support
-            #self.description_box.setAlignment(Qt.AlignLeft | Qt.AlignTop)  # Align text to the top-left
-            #self.description_box.setText("This is your description text. Replace this with the desired content.")
-            #ring_layout.addWidget(self.description_box)
-            pass
-        # Retrieve default parameters
+            self.blank.setPlainText(method_description)
+
+        # Retrieve default parameters, etc. if needed
         default_params = getattr(processing_function, "default_params", {})
 
         if manual:
@@ -6531,12 +6597,11 @@ class MainWindow(QMainWindow):
         if self.refresh_button:
             self.refresh_button.hide()
         self.canpaste = False
+        
         # Collect parameters
-
         preprocess_flag = self.preprocess_checkbox.isChecked()
         bg_removal_flag = self.bg_removal_checkbox.isChecked()
         custom_filter_flag = self.lab_color_checkbox.isChecked()
-
         resize_dim = self.resize_slider.value()
 
         # Build color_key_array based on user selections
@@ -6581,18 +6646,38 @@ class MainWindow(QMainWindow):
         # Update each color in the array with its corresponding slider values
         for color in color_key_array:
             color_number = color['number']
-            
             # Skip RGB (5) and Blank (-1) as they don't need these values
             if color_number in [5, -1]:
                 continue
+            # If you need to add logic for retrieving slider values, do it here
 
-        if False:
+        # If background removal is checked, add the chalks colors
+        if self.bg_removal_checkbox.isChecked():
+            print("Adding chalks colors...")
             color_key_array = self.add_chalks_colors(color_key_array)
-#add
-#-2, #77790e for placing on grass or 
 
-#or -2, #c48e4c
-#for placing on canvas (mutually exclusive)
+        # ----- NEW LOGIC HERE -----
+        # Check if none of the blank checkboxes is checked:
+        #   (i.e. blank_color_num is None)
+        if blank_color_num is None:
+            # If self.ongrasscheckbox is checked, add a grass color
+            if self.ongrasscheckbox.isChecked():
+                color_key_array.append({
+                    'number': -1,
+                    'hex': '77790e',  # Grass color
+                    'boost': 0,
+                    'threshold': 0
+                })
+
+            # If self.oncanvascheckbox is checked, add a canvas color
+            if self.oncanvascheckbox.isChecked():
+                color_key_array.append({
+                    'number': -1,
+                    'hex': 'c48e4c',  # Canvas color
+                    'boost': 0,
+                    'threshold': 0
+                })
+        # ----- END NEW LOGIC -----
 
         process_mode = self.processing_combobox.currentText()
 
@@ -6603,6 +6688,7 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error", "Invalid processing method selected.")
             return
         default_params = getattr(processing_function, 'default_params', {})
+
         for param_name, default_value in default_params.items():
             widget = self.parameter_widgets.get(param_name)
             if isinstance(widget, QSlider):
@@ -6631,27 +6717,28 @@ class MainWindow(QMainWindow):
                     process_params[param_name] = text
             else:
                 process_params[param_name] = default_value
-        brightness = self.brightness_slider.value() / 100
-        # Prepare parameters for image processing
 
+        brightness = self.brightness_slider.value() / 100
+
+        # Prepare parameters for image processing
         params = {
             'image_path': self.image_path,
-            'remove_bg' : bg_removal_flag,
+            'remove_bg': bg_removal_flag,
             'preprocess_flag': preprocess_flag,
-            'use_lab' : custom_filter_flag,
-            'brightness' : brightness,
+            'use_lab': custom_filter_flag,
+            'brightness': brightness,
             'resize_dim': resize_dim,
             'color_key_array': color_key_array,
             'process_mode': process_mode,
             'process_params': process_params
         }
+
         # Switch to status and progress view
         self.status_label.setVisible(True)
         self.progress_bar.setVisible(True)
         self.action_layout.setCurrentIndex(1) 
         self.status_label.setText("Starting processing...")
         self.progress_bar.setValue(0)
-
 
         # Start image processing in a separate thread
         self.signals = WorkerSignals()
