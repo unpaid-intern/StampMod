@@ -39,10 +39,16 @@ got ctrl z to function and changed keybinds
 # 2.0.4 
 - bugfix for off canvas images over 200*200
 # 2.0.5 
-- compatability with the stupid fucking knockoff of r2modman (the thunderstore overwolf mod manager that cant fucking extract webp images fuck you) please if you arent a robot use r2modman instead wtffffffff like it works now but still
-> future updates:
+- compatability with the stupid fucking knockoff of r2modman (the thunderstore overwolf mod manager that cant fucking extract webp images or handle nested folders fuck you) please if you arent a robot use r2modman instead wtffffffff like it works now but still
+# 2.0.6 
+- there was a typo 
+# 2.1.0
 - improved preprocessing logic
 - chalks support
+- gif playback speed options
+
+> future updates:
+- better organised save menu and saved stamp sharing
 - longer gifs and video support with potato radio for audio (cuz its funny lmao)
 - improved ctrl z logic
 - more stamps off-canvas

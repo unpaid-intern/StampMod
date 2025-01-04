@@ -14,6 +14,7 @@ var sent = false
 
 var key_states = {}
 var in_game = false
+var chalks = null
 
 signal spawn_stamp
 signal open_menu
@@ -33,13 +34,18 @@ var default_config_data = {
 	"ctrl_z": 16777220, 
 	"toggle_playback": 45, 
 	"gif_ready": true, 
+	"chalks": false,
+	"host": false,
+	"locked_canvas": [],
 	"walky_talky_webfish": "nothing new!", 
 	"walky_talky_menu": "nothing new!"
 }
 
 func _ready():
 	KeybindsAPI = get_node_or_null("/root/BlueberryWolfiAPIs/KeybindsAPI")
+	chalks = get_node_or_null("/root/hostileonionchalks")
 	load_or_create_config()
+	set_chalks()
 	img_path = _get_stamp_location()
 	frames_path = _get_frames_location()
 	gui_path = _get_gui_location()
@@ -90,6 +96,19 @@ func _process(delta):
 	else:
 		check_key_presses()
 			
+
+func set_chalks():
+	# Check if the 'chalks' node exists and set the config accordingly
+	if !chalks:
+		chalks = false
+	else:
+		chalks = true
+		
+	config_data["chalks"] = chalks
+	save_config()
+	
+	print(prefix, "Chalks set to: ", config_data["chalks"])
+
 
 func check_key_presses():
 	if Input.is_key_pressed(config_data["open_menu"]):
@@ -234,7 +253,7 @@ func load_or_create_config():
 			if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
 				config_data = json_result.result
 				print(prefix, "Config loaded successfully: ", config_data)
-				if config_data.size() != 7:
+				if config_data.size() != 10:
 					print(prefix, "Invalid Config Size, Resetting")
 					reset_config()
 				return 

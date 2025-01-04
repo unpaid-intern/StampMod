@@ -25,6 +25,7 @@ var new_canvas = true
 var _mouse_can_replace = false
 var _canvas_packet
 var last_mouse_pos = Vector2()
+var _current_frame_index = 0  
 var send_load = []
 var send_load_2 = []
 var send_load_3 = []
@@ -167,8 +168,6 @@ func _delete(gif = false):
 		
 func open_menu():
 	update_dynamic_nodes()
-	
-	
 	if _hud and _hud.using_chat:
 		return 
 	
@@ -181,8 +180,9 @@ func open_menu():
 	
 	var command = "cmd.exe"
 	var arguments = ["/C", "cd \"" + gui_dir + "\" && start \"\" \"" + gui_path + "\""]
-	
+
 	var pid = OS.execute(command, arguments, false)
+	old_pid = pid
 	
 	if pid == 0:
 		PlayerData._send_notification("Failed to launch my GUI qwq", 1)
@@ -194,7 +194,7 @@ func open_menu():
 	resetwait()
 	
 func resetwait():
-	yield (get_tree().create_timer(0.5), "timeout")
+	yield (get_tree().create_timer(1), "timeout")
 	wait = false
 	
 		
@@ -244,7 +244,10 @@ func is_in_any_grid(pos: Vector3)->bool:
 	return false
 
 func _spawn_canvas(pos, _offset = 10):
-	
+	if shoulddel:
+		_delete(true)
+		yield (get_tree().create_timer(0.6), "timeout")
+		
 	if current_zone == "main_zone":
 		if (pos.x > 48.571999 - 10 and pos.x < 48.571999 + 10) and (pos.z > - 51.041 - 10 and pos.z < - 51.041 + 10):
 			grid = 1
@@ -261,7 +264,6 @@ func _spawn_canvas(pos, _offset = 10):
 		
 	var offsets = []
 	if four and grid == 0:
-		
 		shoulddel = true
 		match dir:
 			"down":
@@ -473,10 +475,6 @@ func check_image_resolution(file_path, pos):
 					pos = Vector3(154 + (imgy / 2), - 0.3, 1.4)
 					dir = "left"
 					PlayerData._send_notification("Spawning at dock!", 0)
-					if shoulddel:
-						_delete(true)
-						yield (get_tree().create_timer(0.6), "timeout")
-
 					if imgx <= 20 and imgy <= 20:
 						origin = pos
 						four = false
@@ -496,7 +494,6 @@ func check_image_resolution(file_path, pos):
 							origin = pos
 							four = true
 							_spawn_canvas(origin, _offset)
-							yield (get_tree().create_timer(0.4), "timeout")
 							display_image(file_path, origin)
 							_chalk_send()
 						return 
@@ -542,7 +539,6 @@ func check_image_resolution(file_path, pos):
 					origin = pos
 					four = true
 					_spawn_canvas(origin, _offset)
-					yield (get_tree().create_timer(0.4), "timeout")
 					display_image(file_path, origin)
 					_chalk_send()
 		else:
@@ -567,7 +563,6 @@ func check_image_resolution(file_path, pos):
 					origin = pos
 					four = true
 					_spawn_canvas(origin, _offset)
-					yield (get_tree().create_timer(0.4), "timeout")
 					display_image(file_path, origin)
 					_chalk_send()
 	file.close()
@@ -653,128 +648,171 @@ func display_image(file_path, pos):
 			newgif()
 	
 func toggle_playback(message = true):
+	if Input.is_key_pressed(KEY_SHIFT):
+		toggle_playback_mode(true)
+		return
+	
+	if Input.is_key_pressed(KEY_CONTROL):
+		reset_gif()
+		return
+	
 	if not isgif or frames_path == "" or processing:
 		if message:
 			PlayerData._send_notification("No gif to play!", 1)
-		return 
+		return
+	
 	if not isready():
 		PlayerData._send_notification("Still being processed!", 1)
-		return 
+		return
+	
 	if not another or frame_data.size() != _framecount:
 		newgif()
-		return 
+		return
+	
 	if playback_mode == PlaybackMode.MANUAL:
+		# Step forward a single frame each time toggle_playback() is called
 		if manual_frame_index >= frame_data.size():
 			manual_frame_index = 0
 		_play_frame(manual_frame_index)
 		manual_frame_index += 1
-		return 
+		return
+	
+	# Normal/Half/Slow mode toggle
 	_playing = not _playing
 	if not _playing:
 		if message:
 			PlayerData._send_notification("Playback Stopped", 1)
-		return 
+		return
 	else:
 		if message:
 			PlayerData._send_notification("Playing!", 0)
 		_play()
 
+
+func reset_gif():
+	PlayerData._send_notification("Set to frame 1", 0)
+	_current_frame_index = 0
+	manual_frame_index = 0
+	_playing = false
+
+
 func toggle_playback_mode(_message = false):
 	var prior = playback_mode
+	
+	# Cycle the mode
 	playback_mode = int(playback_mode) + 1
 	if playback_mode > PlaybackMode.MANUAL:
 		playback_mode = PlaybackMode.NORMAL
-	var lazy = ["Normal", "Half", "SLOW", "Manual"]
-	Network._update_chat("[color=#9400d3]gif mode changed to: [/color]" + lazy[playback_mode])
-	PlayerData._send_notification("gif mode changed to: " + lazy[playback_mode], 0)
-	if prior == PlaybackMode.MANUAL:
-		_play()
+	
+	# Optional text for the user
+	var mode_names = ["Normal", "Half", "SLOW", "Manual"]
+	if _message:
+		PlayerData._send_notification("GIF mode changed to: " + mode_names[playback_mode], 0)
+	
+	# If we're switching FROM normal/half/slow INTO manual:
+	#   1) Pause if currently playing
+	#   2) Sync manual_frame_index to the last frame we showed in _current_frame_index
+	if prior in [PlaybackMode.NORMAL, PlaybackMode.HALF, PlaybackMode.SLOW] and playback_mode == PlaybackMode.MANUAL:
+		if _playing:
+			_playing = false
+		manual_frame_index = _current_frame_index
+	
+	# If we're switching FROM manual INTO normal/half/slow:
+	#   1) Sync _current_frame_index to manual_frame_index
+	#   2) Do NOT auto-play or reset. The user must press "Play" again if they want to resume.
+	if prior == PlaybackMode.MANUAL and playback_mode in [PlaybackMode.NORMAL, PlaybackMode.HALF, PlaybackMode.SLOW]:
+		_current_frame_index = manual_frame_index
+
 
 func newgif():
 	processing = true
 	_playing = false
 	
-	
 	frame_delays = []
 	frame_data = []
 	manual_frame_index = 0
-
+	_current_frame_index = 0
+	
 	var file = File.new()
 	if file.open(frames_path, File.READ) != OK:
 		push_error("Failed to open file: %s" % frames_path)
 		processing = false
-		return 
-
+		return
+	
 	var current_frame = null
-	var current_delay = _framedelay if _framedelay != - 1 else 100
-
+	var current_delay = _framedelay if _framedelay != -1 else 100
+	
 	while not file.eof_reached():
 		var line = file.get_line().strip_edges()
 		
-		
 		if line.begins_with("frame,"):
-			
 			if current_frame != null:
 				frame_data.append(current_frame)
 				frame_delays.append(current_delay)
-
 			
 			current_frame = []
 			var frame_parts = line.split(",")
-			if _framedelay == - 1 and frame_parts.size() > 2:
+			if _framedelay == -1 and frame_parts.size() > 2:
 				current_delay = max(frame_parts[2].to_int(), 10)
 			else:
 				current_delay = _framedelay
-
+		
 		elif line != "":
-			
 			if current_frame == null:
 				push_error("Pixel data encountered before frame start!")
 				continue
 			
-			
 			var pixel_parts = line.split(",")
 			if pixel_parts.size() == 3:
 				current_frame.append({
-					"x": pixel_parts[0].to_float(), 
-					"y": pixel_parts[1].to_float(), 
+					"x": pixel_parts[0].to_float(),
+					"y": pixel_parts[1].to_float(),
 					"color": pixel_parts[2].to_int()
 				})
-
 	
 	if current_frame != null:
 		frame_data.append(current_frame)
 		frame_delays.append(current_delay)
-
+	
 	file.close()
 	another = true
-
 	processing = false
-
+	playback_mode = PlaybackMode.NORMAL
 	
 	if frame_data.size() != _framecount:
 		print("WTF")
 	else:
 		print("Frame data reset and loaded successfully!")
 
-	
+
 func _play():
 	while _playing:
 		if playback_mode == PlaybackMode.MANUAL:
-			return 
+			# In manual mode, we exit and let toggle_playback() do single-frame stepping
+			return
 		else:
-			for frame_index in range(frame_data.size()):
-				_play_frame(frame_index)
-				var delay = frame_delays[frame_index] / 1000.0
-				match playback_mode:
-					PlaybackMode.NORMAL:
-						yield (get_tree().create_timer(delay), "timeout")
-					PlaybackMode.HALF:
-						yield (get_tree().create_timer(delay * 2), "timeout")
-					PlaybackMode.SLOW:
-						yield (get_tree().create_timer(delay * 10), "timeout")
-				if not _playing:
-					return 
+			# Draw the current frame
+			_play_frame(_current_frame_index)
+			
+			# Figure out how long to wait based on playback mode
+			var delay = frame_delays[_current_frame_index] / 1000.0
+			match playback_mode:
+				PlaybackMode.NORMAL:
+					yield(get_tree().create_timer(delay), "timeout")
+				PlaybackMode.HALF:
+					yield(get_tree().create_timer(delay * 2), "timeout")
+				PlaybackMode.SLOW:
+					yield(get_tree().create_timer(delay * 10), "timeout")
+			
+			# Move to next frame
+			_current_frame_index += 1
+			if _current_frame_index >= frame_data.size():
+				_current_frame_index = 0  # Loop around
+			
+			# If stopped mid-loop, exit
+			if not _playing:
+				return
+
 
 func _play_frame(frame_index):
 	for pixel in frame_data[frame_index]:
@@ -785,20 +823,21 @@ func _play_frame(frame_index):
 		var adjusted_position = Vector3()
 		match dir:
 			"up":
-				adjusted_position = Vector3( - local_x, 0, - local_y)
+				adjusted_position = Vector3(-local_x, 0, -local_y)
 			"right":
-				adjusted_position = Vector3(local_y, 0, - local_x)
+				adjusted_position = Vector3(local_y, 0, -local_x)
 			"left":
-				adjusted_position = Vector3( - local_y, 0, local_x)
+				adjusted_position = Vector3(-local_y, 0, local_x)
 			"down":
 				adjusted_position = Vector3(local_x, 0, local_y)
 			_:
 				push_error("Invalid direction specified: %s" % dir)
-				return 
-
+				return
+		
 		var final_position = origin + base + adjusted_position
 		_chalk_draw(final_position, pixel_color)
 	_chalk_send()
+
 
 func _chalk_draw(pos, color):
 	if four:

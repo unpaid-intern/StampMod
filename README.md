@@ -48,19 +48,21 @@ Follow these steps to get it running:
 > **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
 - **`F4` Key**  
-  - Opens my stamp menu executable or brings it to the front.
+	- Opens my stamp menu executable or brings it to the front.
 
 - **`PLUS` Key (+)**  
-  - Spawns a stamp at the cursor position.
-  - Spawns a stamp at the player position if `SHIFT` is held.
-  - Spawns a stamp at the dock if `CTRL` is held.
-  - Spawns a stamp on **Canvas 1**, **Canvas 2**, **Canvas 3**, or **Canvas 4** if combined with `1`, `2`, `3`, or `4`, respectively.
+	- Spawns a stamp at the cursor position.  
+	- Spawns a stamp at the player position if `SHIFT` is held.  
+	- Spawns a stamp at the dock if `CTRL` is held.  
+	- Spawns a stamp on **Canvas 1**, **Canvas 2**, **Canvas 3**, or **Canvas 4** if combined with `1`, `2`, `3`, or `4`, respectively.
 
 - **`Minus` Key (-)**  
-  - Toggles GIF playback if a GIF has been placed down.
+	- Toggles GIF playback if a GIF has been placed down.  
+	- When `SHIFT` is held, toggles playback speed instead.  
+	- When `CTRL` is held, resets the GIF to play from frame one.
 
 - **`BACKSPACE` Key**  
-  - Works as **Ctrl+Z**, undoing the last placed stamps in order.
+	- Works as **Ctrl+Z**, undoing the last placed stamps in order.
 
 
 # Image Processing Guide
@@ -84,28 +86,20 @@ Ultimately, you should **experiment** with different methods to find the style t
 ---
 
 ### **Color Options**
-
 Choose what chalk colors to use by **enabling** or **disabling** them.
 
 - Use **RGB** to map an image’s colors to RGB chalk.  
 - Use **Blank** to make certain colors fully transparent.
-
-#### **Boost and Threshold Adjustments**
-- **Boost:** Enhances the intensity of specific chalk colors in an image, making muted tones stand out more. Higher values = brighter colors.  
-- **Threshold:** Adjusts how closely a pixel's color must match a chalk color to be boosted. Lower values are more precise, while higher values affect broader ranges.
-
----
+- Use **Placing on Canvas** or **Placing on Grass** to add that color to available colors for increased color accuracy.
 
 ### **What is LAB and When to Use It?**
 
 >**LAB** is a color space that better reflects how humans perceive color, improving the accuracy of color matching compared to RGB.
 
 - **Turn LAB On**: For images with subtle gradients or color shifts where precise matching matters.  
-- **Turn LAB Off**: For bold, flat colors... I think?
+- **Turn LAB Off**: For bold, flat colors... I think? If the blues are looking a little too red... 
 
-Basically, if you aren't happy with a result, try turning it off! It's on by default but not always better~
-
-Sometimes **disabling green chalk** will make LAB results look better **:3**
+Basically, if you aren't happy with a result, try turning it off! It's on by default but not always better :3
 
 
 # Canvas map
