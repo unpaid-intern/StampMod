@@ -48,6 +48,7 @@ got ctrl z to function and changed keybinds
 - adds grass and canvas to color options
 - gif playback speed options
 - took boost and threshold options away from the user because the user cannot be trusted to make competent decisions, done automatically now.
+- fixed for thunderstore mod manager (again!) fuck em
 
 > future updates:
 - better organised save menu and saved stamp sharing

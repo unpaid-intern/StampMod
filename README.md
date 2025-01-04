@@ -16,6 +16,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%appdata%/local/webfishing_stamps_mod` on Windows
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
 - I recommend installing the **Calico mod**! (it can cause stuttering with gifs though)
+- Please dont use Thunderstore Mod Manager
 
 # OH NO ITS NOT LAUNCHING FROM THE GAME (LINUX ONLY)
 

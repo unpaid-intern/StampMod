@@ -4050,7 +4050,62 @@ class MainWindow(QMainWindow):
                 3: '0db39e',
                 4: 'f4c009',
                 5: 'ff00ff',
-                6: 'bac357'
+                6: 'bac357',
+                7: 'a3b2d2',
+                8: 'd6cec2',
+                9: 'bfded8',
+                10: 'a9c484',
+                11: '5d937b',
+                12: 'a2a6a9',
+                13: '777f8f',
+                14: 'eab281',
+                15: 'ea7286',
+                16: 'f4a4bf',
+                17: 'a07ca7',
+                18: 'bf796d',
+                19: 'f5d1b6',
+                20: 'e3e19f',
+                21: 'ffdf00',
+                22: 'ffbf00',
+                23: 'c4b454',
+                24: 'f5deb3',
+                25: 'f4c430',
+                26: '00ffff',
+                27: '89cff0',
+                28: '4d4dff',
+                29: '00008b',
+                30: '4169e1',
+                31: '006742',
+                32: '4cbb17',
+                33: '2e6f40',
+                34: '2e8b57',
+                35: 'c0c0c0',
+                36: '818589',
+                37: '899499',
+                38: '708090',
+                39: 'ffa500',
+                40: 'ff8c00',
+                41: 'd7942d',
+                42: 'ff5f1f',
+                43: 'cc7722',
+                44: 'ff69b4',
+                45: 'ff10f0',
+                46: 'aa336a',
+                47: 'f4b4c4',
+                48: '953553',
+                49: 'd8bfd8',
+                50: '7f00ff',
+                51: '800080',
+                52: 'ff2400',
+                53: 'ff4433',
+                54: 'a52a2a',
+                55: '913831',
+                56: 'ff0000',
+                57: '3b2219',
+                58: 'a16e4b',
+                59: 'd4aa78',
+                60: 'e6bc98',
+                61: 'ffe7d1'
             }
 
             # Convert hex colors to RGB tuples
@@ -6024,7 +6079,8 @@ class MainWindow(QMainWindow):
 
         self.preprocess_checkbox.setChecked(True)
         self.lab_color_checkbox.setChecked(True)
-        self.bg_removal_checkbox.setChecked(False)
+        self.oncanvascheckbox.setChecked(False)
+        self.ongrasscheckbox.setChecked(False)
         self.brightness_label.setVisible(True)
         self.brightness_slider.setVisible(True)
 
@@ -6244,7 +6300,8 @@ class MainWindow(QMainWindow):
                     self.threshold_labels[color_number].setVisible(True)
 
             self.preprocess_checkbox.setChecked(True)
-            self.bg_removal_checkbox.setChecked(False)
+            self.oncanvascheckbox.setChecked(False)
+            self.ongrasscheckbox.setChecked(False)
             self.lab_color_checkbox.setChecked(True)
 
             if self.back_button:
@@ -6968,7 +7025,8 @@ class MainWindow(QMainWindow):
         # Reset processing flags
         self.preprocess_checkbox.setChecked(True)
         self.lab_color_checkbox.setChecked(True)
-        self.bg_removal_checkbox.setChecked(False)
+        self.oncanvascheckbox.setChecked(False)
+        self.ongrasscheckbox.setChecked(False)
 
         # Ensure all boost and threshold elements are hidden
         for color_number in self.boost_labels:
