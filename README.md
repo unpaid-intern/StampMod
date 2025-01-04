@@ -9,6 +9,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 # General Information
 - You can **paste images** into the menu directly or **select a file**
+- Supports art saving and image generation if using [chalks](https://thunderstore.io/c/webfishing/p/hostileonion/chalks/) by the wonderful hostileonion
 - Stamps are automatically adjusted to be **upright relative to the player camera**
 - In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
 - **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
