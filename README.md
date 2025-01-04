@@ -114,7 +114,7 @@ If you wish to know the location of a specific canvas, please refer to the below
 **Ensure to not accidentally download from `Code`**
 1. Ensure [GDWeave](https://github.com/NotNite/GDWeave) is installed and working properly.
 2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip) or [for Linux](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps_Linux.zip)
-3. Extract to `PurplePuppy-Stamps` (`PurplePuppy-Stamps-Linux` for linux) and be careful to **not rename it**.
+3. Extract to `PurplePuppy-Stamps` (`PurplePuppy-Stamps_Linux` for linux) and be careful to **not rename it**.
 4. Download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract to `BlueberryWolfi.APIs`
 5. Place folders in `WEBFISHING/GDWeave/Mods/`
 
