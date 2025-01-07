@@ -6,10 +6,13 @@ import tempfile
 import json
 import time
 import math
+import numba
 from pathlib import Path
 import socket
 from filelock import FileLock, Timeout
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 import webbrowser
 import cv2 
 # Image processing libraries
@@ -1734,25 +1737,101 @@ def save_image(img, preview_path, color_key_array):
     # Save the processed image to the preview path
     output_img.save(preview_path, format='PNG')
 
-def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag,
-                         progress_callback=None, message_callback=None, error_callback=None):
+
+
+
+
+# Helper function to convert hex to RGB
+def hex_to_rgb(hex_str):
+    """
+    Converts a hexadecimal color string to an RGB tuple.
+
+    Args:
+        hex_str (str): A 6-character hexadecimal string, e.g., 'ffe7c5'.
+
+    Returns:
+        tuple: A tuple of integers representing the RGB values, e.g., (255, 231, 197).
+    """
+    try:
+        return tuple(int(hex_str[i:i+2], 16) for i in (0, 2, 4))
+    except Exception:
+        return (0, 0, 0)  # Default to black on error
+
+# Numba-accelerated function to find the closest color number
+@numba.njit
+def find_closest_color(pixel, color_key_array, color_key_numbers):
+    """
+    Finds the closest color number from color_key_array for the given pixel.
+
+    Args:
+        pixel (np.ndarray): An array representing the RGB values of the pixel, e.g., [255, 231, 197].
+        color_key_array (np.ndarray): A 2D array of RGB values for the color key.
+        color_key_numbers (np.ndarray): A 1D array of color numbers corresponding to color_key_array.
+
+    Returns:
+        int: The color number of the closest color in color_key_array.
+    """
+    min_dist = 1e10
+    min_index = -1
+    for i in range(color_key_array.shape[0]):
+        dist = 0.0
+        for j in range(3):
+            diff = color_key_array[i, j] - pixel[j]
+            dist += diff * diff
+        if dist < min_dist:
+            min_dist = dist
+            min_index = i
+    if min_index != -1:
+        return color_key_numbers[min_index]
+    else:
+        return -1  # Indicates no match found
+
+def process_and_save_gif(
+    image_path,
+    target_size,
+    process_mode,
+    use_lab_flag,
+    process_params,
+    color_key_array,
+    remove_bg,
+    preprocess_flag,
+    progress_callback=None,
+    message_callback=None,
+    error_callback=None
+):
     """
     Processes and saves an animated image (GIF or WebP) according to specified parameters.
+    Utilizes NumPy and Numba for optimized performance.
+
+    Args:
+        image_path (str): Path to the input image.
+        target_size (tuple): Target size for the frames (width, height).
+        process_mode (str): Processing mode.
+        use_lab_flag (bool): Flag to use LAB color space.
+        process_params (dict): Additional processing parameters.
+        color_key_array (list): List of color key dictionaries with 'number' and 'hex' keys.
+        remove_bg (bool): Flag to remove background.
+        preprocess_flag (bool): Flag to preprocess the image.
+        progress_callback (function, optional): Callback for progress updates.
+        message_callback (function, optional): Callback for messages.
+        error_callback (function, optional): Callback for errors.
     """
     try:
         set_gif_ready_false()
+
         # Open frames.txt and clear its contents
         current_dir = exe_path_fs('game_data/current_stamp_data')
         os.makedirs(current_dir, exist_ok=True)  # Ensure the directory exists
-        frames_txt_path = exe_path_fs('game_data/current_stamp_data/frames.txt')
-        with open(frames_txt_path, 'w') as frames_file:
+        frames_txt_path = os.path.join(current_dir, 'frames.txt')
+        with open(frames_txt_path, 'w'):
             pass  # Clears the file
 
         # Open the image
         img = Image.open(image_path)
         if not getattr(img, "is_animated", False):
+            message = "Selected file is not an animated image with multiple frames."
             if message_callback:
-                message_callback("Selected file is not an animated image with multiple frames.")
+                message_callback(message)
             img.close()
             return
 
@@ -1761,31 +1840,41 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
             message_callback(f"Total frames in image: {total_frames}")
 
         # Gather delays for each frame
-
         delays = get_frame_delays(image_path)
         # Determine delay uniformity
         uniform_delay = delays[0] if all(d == delays[0] for d in delays) else -1
 
         # Save frames to 'Frames' directory (and clear it first)
-        save_frames(img, target_size, process_mode, use_lab_flag, process_params, remove_bg, preprocess_flag, color_key_array,
-                    progress_callback, message_callback, error_callback)
+        save_frames(
+            img,
+            target_size,
+            process_mode,
+            use_lab_flag,
+            process_params,
+            remove_bg,
+            preprocess_flag,
+            color_key_array,
+            progress_callback,
+            message_callback,
+            error_callback
+        )
 
         # Create and clear 'preview' folder
         preview_folder = create_and_clear_preview_folder(message_callback)
 
-        # Now process frames and write to frames.txt
+        # Construct color_key_rgb and color_key_numbers from color_key_array
+        color_key_rgb = np.array([hex_to_rgb(color['hex']) for color in color_key_array], dtype=np.float32)
+        color_key_numbers = np.array([color['number'] for color in color_key_array], dtype=np.int32)
+
         # Load the first frame
         first_frame_path = exe_path_fs('game_data/frames/frame_1.png')
 
-        if not first_frame_path.exists:
+        if not os.path.exists(first_frame_path):
+            error_message = f"First frame not found at {first_frame_path}"
             if error_callback:
-                error_callback(f"First frame not found at {first_frame_path}")
+                error_callback(error_message)
             img.close()
             return
-
-        # Construct color_key from color_key_array
-        color_key = build_color_key(color_key_array)
-       
 
         # Process first frame and write to stamp.txt
         with Image.open(first_frame_path) as first_frame:
@@ -1794,94 +1883,65 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
             scaled_height = round(height * 0.1, 1)  # Multiply by 0.1
 
             # Write header to stamp.txt
-            current_dir = exe_path_fs('game_data/current_stamp_data')
-            os.makedirs(current_dir, exist_ok=True)  # Ensure the directory exists
-            stamp_txt_path = current_dir / 'stamp.txt'
+            stamp_txt_path = os.path.join(current_dir, 'stamp.txt')
             with open(stamp_txt_path, 'w') as stamp_file:
                 stamp_file.write(f"{scaled_width},{scaled_height},gif,{total_frames},{uniform_delay}\n")
                 if message_callback:
                     message_callback(f"Header written to stamp.txt: {scaled_width},{scaled_height},gif,{total_frames},{uniform_delay}")
 
-                # Initialize Frame1Array and store the first frame's pixels
-                Frame1Array = {}  # Dictionary to store pixels as {(x, y): color_num}
-                first_frame_pixels = {}  # Store for looping comparison
+                # Convert frame to NumPy array
+                frame_array = np.array(first_frame.convert('RGBA'))
+                alpha_channel = frame_array[:, :, 3]
+                mask = alpha_channel > 191  # Opaque pixels
+                rgb_array = frame_array[:, :, :3].astype(np.float32)
 
-                pixels = first_frame.load()
+                # Initialize Frame1Array and first_frame_pixels as 2D arrays
+                Frame1Array = -1 * np.ones((height, width), dtype=np.int32)
+                first_frame_pixels = -1 * np.ones((height, width), dtype=np.int32)
+
                 for y in range(height):
                     for x in range(width):
-                        pixel = pixels[x, y]
-                        if len(pixel) == 4:  # RGBA
-                            r, g, b, a = pixel
-                            if a <= 191:
-                                continue  # Skip pixels with alpha <= 191
-                        else:
-                            r, g, b = pixel
-                            a = 255  # Assume fully opaque
-                            if a <= 191:
-                                continue  # Skip pixels with alpha <= 191
+                        if mask[y, x]:
+                            pixel = rgb_array[y, x]
+                            color_num = find_closest_color(pixel, color_key_rgb, color_key_numbers)
+                            Frame1Array[y, x] = color_num
+                            first_frame_pixels[y, x] = color_num
 
-                        # Map the pixel to the closest color
-                        closest_color_num = find_closest_color((r, g, b), color_key)
-                        Frame1Array[(x, y)] = closest_color_num
-                        first_frame_pixels[(x, y)] = closest_color_num  # Store for looping comparison
+                            # Scale the coordinates
+                            scaled_x = round(x * 0.1, 1)
+                            scaled_y = round(y * 0.1, 1)
 
-                        # Scale the coordinates
-                        scaled_x = round(x * 0.1, 1)
-                        scaled_y = round(y * 0.1, 1)
-
-                        # Write to stamp.txt
-                        stamp_file.write(f"{scaled_x},{scaled_y},{closest_color_num}\n")
+                            # Write to stamp.txt
+                            stamp_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
 
         # Process subsequent frames
         header_frame_number = 1  # Start header numbering from 1
 
         for frame_number in range(2, total_frames + 1):  # Start from frame 2
             frame_path = exe_path_fs(f'game_data/frames/frame_{frame_number}.png')
-            if not frame_path.exists:
+            if not os.path.exists(frame_path):
                 if message_callback:
                     message_callback(f"Frame {frame_number} not found at {frame_path}")
                 continue
 
             with Image.open(frame_path) as frame:
-                pixels = frame.load()
-                current_frame_pixels = {}
+                frame_array = np.array(frame.convert('RGBA'))
+                alpha_channel = frame_array[:, :, 3]
+                mask = alpha_channel > 191  # Opaque pixels
+                rgb_array = frame_array[:, :, :3].astype(np.float32)
 
-                # Collect pixels in current frame
+                # Initialize CurrentFrameArray
+                CurrentFrameArray = -1 * np.ones((height, width), dtype=np.int32)
+
                 for y in range(height):
                     for x in range(width):
-                        pixel = pixels[x, y]
-                        if len(pixel) == 4:
-                            r, g, b, a = pixel
-                            if a <= 191:
-                                current_color_num = -1  # Treat as transparent
-                            else:
-                                current_color_num = find_closest_color((r, g, b), color_key)
-                        else:
-                            r, g, b = pixel
-                            a = 255  # Assume fully opaque
-                            if a <= 191:
-                                current_color_num = -1  # Treat as transparent
-                            else:
-                                current_color_num = find_closest_color((r, g, b), color_key)
+                        if mask[y, x]:
+                            pixel = rgb_array[y, x]
+                            color_num = find_closest_color(pixel, color_key_rgb, color_key_numbers)
+                            CurrentFrameArray[y, x] = color_num
 
-                        current_frame_pixels[(x, y)] = current_color_num
-                        message_callback(f"Finished writing frame {frame_number}")
-
-
-                # Compare with Frame1Array and find differences
-                diffs = []
-                all_positions = set(Frame1Array.keys()) | set(current_frame_pixels.keys())
-                for (x, y) in all_positions:
-                    prev_color_num = Frame1Array.get((x, y), -1)
-                    current_color_num = current_frame_pixels.get((x, y), -1)
-
-                    if current_color_num != prev_color_num:
-                        if current_color_num == -1:
-                            # Pixel became transparent
-                            diffs.append((x, y, -1))
-                        else:
-                            # Pixel changed color or became visible
-                            diffs.append((x, y, current_color_num))
+                # Find differences between CurrentFrameArray and Frame1Array
+                diffs = np.argwhere(CurrentFrameArray != Frame1Array)
 
                 # Write header and diffs to frames.txt
                 with open(frames_txt_path, 'a') as frames_file:
@@ -1891,42 +1951,28 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
                         frames_file.write(f"frame,{header_frame_number},{frame_delay}\n")
                     else:
                         frames_file.write(f"frame,{header_frame_number}\n")
-                    for x, y, color_num in diffs:
+
+                    for y, x in diffs:
+                        color_num = CurrentFrameArray[y, x]
                         # Scale coordinates by multiplying by 0.1
                         scaled_x = round(x * 0.1, 1)
                         scaled_y = round(y * 0.1, 1)
                         frames_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
 
                 # Update Frame1Array
-                Frame1Array = current_frame_pixels.copy()
+                Frame1Array = CurrentFrameArray.copy()
 
-            if progress_callback:
-                progress = (frame_number - 1) / total_frames * 100
-                progress_callback(progress)
+                # Update progress
+                if progress_callback:
+                    progress = (frame_number - 1) / total_frames * 100
+                    progress_callback(progress)
 
-            header_frame_number += 1  # Increment header frame number
+                header_frame_number += 1  # Increment header frame number
 
         # After processing all frames, compare last frame to first frame to complete the loop
-        # Compare Frame1Array (last frame) with first_frame_pixels (first frame)
-        diffs = []
-        all_positions = set(first_frame_pixels.keys()) | set(Frame1Array.keys())
+        diffs = np.argwhere(Frame1Array != first_frame_pixels)
 
-        for (x, y) in all_positions:
-            first_color_num = first_frame_pixels.get((x, y), -1)
-            last_color_num = Frame1Array.get((x, y), -1)
-
-            if first_color_num != last_color_num:
-                if first_color_num == -1:
-                    # Pixel became visible in first frame
-                    diffs.append((x, y, first_color_num))
-                elif last_color_num == -1:
-                    # Pixel became transparent
-                    diffs.append((x, y, -1))
-                else:
-                    # Pixel changed color
-                    diffs.append((x, y, first_color_num))
-
-        # Write header and diffs to frames.txt
+        # Write header and diffs to frames.txt for the final loop
         with open(frames_txt_path, 'a') as frames_file:
             # Include delay if variable delays
             final_frame_number = header_frame_number
@@ -1935,7 +1981,9 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
                 frames_file.write(f"frame,{final_frame_number},{frame_delay}\n")
             else:
                 frames_file.write(f"frame,{final_frame_number}\n")
-            for x, y, color_num in diffs:
+
+            for y, x in diffs:
+                color_num = first_frame_pixels[y, x]
                 # Scale coordinates by multiplying by 0.1
                 scaled_x = round(x * 0.1, 1)
                 scaled_y = round(y * 0.1, 1)
@@ -1944,15 +1992,32 @@ def process_and_save_gif(image_path, target_size, process_mode, use_lab_flag, pr
         if message_callback:
             message_callback(f"Processing of animated image frames complete! Data saved to: {frames_txt_path}")
 
-
         # Generate preview GIF after all processing is done
-        create_preview_gif(total_frames, delays, preview_folder, color_key_array, progress_callback, message_callback, error_callback)
+        create_preview_gif(
+            total_frames,
+            delays,
+            preview_folder,
+            color_key_array,
+            progress_callback,
+            message_callback,
+            error_callback
+        )
         set_gif_ready_true()
         img.close()  # Close the image after processing
+        print("GIF processing finished successfully.")
 
     except Exception as e:
+        error_message = f"An error occurred in process_and_save_gif: {e}"
+        print(error_message)
+        import traceback
+        traceback.print_exc()
         if error_callback:
-            error_callback(f"An error occurred in process_and_save_gif: {e}")
+            error_callback(error_message)
+
+
+
+
+
 
 def get_frame_delays(image_path):
     """
@@ -2120,7 +2185,7 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
 
             # Save the frame
             frame_file = output_folder / f"frame_{frame_number}.png"
-            frame.save(frame_file, "PNG")
+            save_image(frame, frame_file, color_key_array)
 
             if progress_callback:
                 progress = frame_number / total_frames * 100
@@ -2132,7 +2197,6 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
     except Exception as e:
         if error_callback:
             error_callback(f"An error occurred while saving frames: {e}")
-
 
 def create_preview_gif(total_frames, delays, preview_folder, color_key_array, progress_callback=None, message_callback=None, error_callback=None):
     """
@@ -2146,12 +2210,13 @@ def create_preview_gif(total_frames, delays, preview_folder, color_key_array, pr
 
         frames = []
         frame_durations = []
-        for frame_number in range(1, total_frames + 1):
-            frame_path = frames_folder / f"frame_{frame_number}.png"
-            if not os.path.exists(frame_path):
-                if message_callback:
-                    message_callback(f"Frame {frame_number} not found at {frame_path}")
-                continue
+
+        # Ensure we process exactly 500 frames if more are available
+        frame_paths = [frames_folder / f"frame_{i}.png" for i in range(1, total_frames + 1)]
+        valid_frame_paths = [path for path in frame_paths if os.path.exists(path)]
+        valid_frame_paths = valid_frame_paths[:500]
+
+        for frame_number, frame_path in enumerate(valid_frame_paths, start=1):
             frame = Image.open(frame_path).convert('RGBA')
             frames.append(frame)
             frame_durations.append(delays[frame_number - 1])  # Duration in ms
@@ -2221,6 +2286,7 @@ def create_preview_gif(total_frames, delays, preview_folder, color_key_array, pr
             error_callback(f"An error occurred in create_preview_gif: {e}")
 
 
+
 def create_and_clear_preview_folder(message_callback=None):
     """
     Creates and clears the 'preview' folder.
@@ -2252,7 +2318,6 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
     upper_bound = 1.53
     global chalks_colors
     chalks_colors = remove_bg
-    print(chalks_colors)
     # Calculate the delta
     delta = brightness_flag - mid_point
 
@@ -2715,7 +2780,6 @@ class MainWindow(QMainWindow):
         self.last_message_displayed = None
         self.connected = False
         self.window_titles = [
-            "PEANITS",
             "are you kidding me?",
             "wOrks on My machine",
             "the hunt for purple chalk",
@@ -2741,7 +2805,11 @@ class MainWindow(QMainWindow):
             "purplepuppy more like uhh stupidpuppy gotem",
             "Waka waka waka",
             "This is a bucket",
-            "bork meooow"
+            "bork meooow",
+            "The roots are growing",
+            "\"A mere setback.\" -grandma ",
+            "\"shrivel\" -grandma ",
+            "Gnarp gnap"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
@@ -4795,13 +4863,7 @@ class MainWindow(QMainWindow):
             self.brightness_slider.setTickInterval(1)
             brightness_layout.addWidget(self.brightness_slider, alignment=Qt.AlignTop)
 
-            # Just like resize, add a value label for brightness
-            self.brightness_value_label = QLabel(str(self.brightness_slider.value()))
-            self.brightness_value_label.setAlignment(Qt.AlignTop)
-            brightness_layout.addWidget(self.brightness_value_label, alignment=Qt.AlignTop)
 
-            # Connect brightness slider to update label
-            self.brightness_slider.valueChanged.connect(lambda v: self.brightness_value_label.setText(str(v)))
 
             method_options_widget_layout.addLayout(brightness_layout)
             method_options_widget_layout.addLayout(self.method_options_layout)
@@ -5779,6 +5841,7 @@ class MainWindow(QMainWindow):
 
         # Connect toggle functions
         self.preprocess_checkbox.toggled.connect(self.toggle_boost_elements)
+        self.bg_removal_checkbox.toggled.connect(self.brightness_toggle)
         self.lab_color_checkbox.toggled.connect(self.lab_value_toggle)
 
 
@@ -5809,12 +5872,24 @@ class MainWindow(QMainWindow):
             self.threshold_sliders[color_number].setVisible(False)
 
 
+    def brightness_toggle(self, checked):
+        """
+        Toggles the visibility of Boost labels and sliders based on the state of the Preprocess Image checkbox.
+        They only reappear if their corresponding color box is enabled.
+        """
+        if not checked and self.preprocess_checkbox.isChecked():
+            self.brightness_label.setVisible(True)
+            self.brightness_slider.setVisible(True)
+        else:
+            self.brightness_label.setVisible(False)
+            self.brightness_slider.setVisible(False)
+
     def toggle_boost_elements(self, checked):
         """
         Toggles the visibility of Boost labels and sliders based on the state of the Preprocess Image checkbox.
         They only reappear if their corresponding color box is enabled.
         """
-        if checked:
+        if checked and not self.bg_removal_checkbox.isChecked():
             self.brightness_label.setVisible(True)
             self.brightness_slider.setVisible(True)
         else:
@@ -5827,7 +5902,7 @@ class MainWindow(QMainWindow):
                 self.boost_sliders[color_number].setVisible(False)
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
-            else:  # Hide if preprocessing is disabled or the color box is not enabled
+            else:  
                 self.boost_labels[color_number].setVisible(False)
                 self.boost_sliders[color_number].setVisible(False)
                 self.threshold_labels[color_number].setVisible(False)
@@ -6334,89 +6409,127 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load image: {str(e)}")
 
-
-    def display_gif(self, file_path):
+    def display_gif(self, file_path, progress_callback=None, message_callback=None, error_callback=None):
         """
-        Processes and displays an animated GIF or WebP with fixed dimensions (416x376).
-        The GIF retains its aspect ratio, with one dimension reaching 416 or 376, and is aligned
+        Processes and displays an animated GIF or WebP with fixed dimensions (416x256).
+        The GIF retains its aspect ratio, with one dimension reaching 416 or 256, and is aligned
         bottom-center in the larger frame. Downscaling uses bicubic; upscaling uses nearest neighbor.
         Frame delays are preserved to maintain the original animation speed.
+        Only the first 500 frames are processed and displayed.
+        
+        Parameters:
+            file_path (str or Path): Path to the input GIF or WebP file.
+            progress_callback (callable, optional): Function to report progress, accepts (current, total).
+            message_callback (callable, optional): Function to display messages, accepts (message).
+            error_callback (callable, optional): Function to handle errors, accepts (error_message).
         """
-        # Ensure the passed widget is a QLabel
-        if not isinstance(self.image_label, QLabel):
-            raise ValueError("The 'image_label' argument must be an instance of QLabel.")
+        MAX_FRAMES = 500  # Maximum number of frames to process
 
-        # Define fixed dimensions
-        frame_width, frame_height = 416, 256
+        try:
+            # Ensure the passed widget is a QLabel
+            if not isinstance(self.image_label, QLabel):
+                raise ValueError("The 'image_label' attribute must be an instance of QLabel.")
 
-        # Temporary file for the resized GIF
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".webp")
-        temp_path = temp_file.name
+            # Define fixed dimensions
+            frame_width, frame_height = 416, 256
 
-        with Image.open(file_path) as img:
-            # Determine aspect ratio and new dimensions
-            img_width, img_height = img.size
-            aspect_ratio = img_width / img_height
+            # Temporary file for the resized GIF/WebP
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".webp")
+            temp_path = temp_file.name
+            temp_file.close()  # Close the file so PIL can write to it
 
-            if aspect_ratio > 1:  # Wider than tall
-                new_width = frame_width
-                new_height = int(frame_width / aspect_ratio)
-                if new_height > frame_height:
-                    new_height = frame_height
-                    new_width = int(new_height * aspect_ratio)
-            else:  # Taller than wide
-                new_height = frame_height
-                new_width = int(frame_height * aspect_ratio)
-                if new_width > frame_width:
+            with Image.open(file_path) as img:
+                # Determine aspect ratio and new dimensions
+                img_width, img_height = img.size
+                aspect_ratio = img_width / img_height
+
+                if aspect_ratio > 1:  # Wider than tall
                     new_width = frame_width
-                    new_height = int(new_width / aspect_ratio)
+                    new_height = int(frame_width / aspect_ratio)
+                    if new_height > frame_height:
+                        new_height = frame_height
+                        new_width = int(new_height * aspect_ratio)
+                else:  # Taller than wide
+                    new_height = frame_height
+                    new_width = int(frame_height * aspect_ratio)
+                    if new_width > frame_width:
+                        new_width = frame_width
+                        new_height = int(new_width / aspect_ratio)
 
-            # Calculate offsets for bottom-center alignment
-            x_offset = (frame_width - new_width) // 2
-            y_offset = frame_height - new_height
+                # Calculate offsets for bottom-center alignment
+                x_offset = (frame_width - new_width) // 2
+                y_offset = frame_height - new_height
 
-            # Create a blank RGBA canvas for the fixed frame dimensions
-            blank_frame = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
+                # Create a blank RGBA canvas for the fixed frame dimensions
+                blank_frame = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
 
-            # Process all frames and preserve frame delays
-            frames = []
-            delays = []
-            for frame in ImageSequence.Iterator(img):
-                frame = frame.convert("RGBA")  # Ensure consistent format
-                resample_method = (
-                    Image.Resampling.BICUBIC if img_width > new_width or img_height > new_height else Image.Resampling.NEAREST
+                # Process frames with a limit of MAX_FRAMES
+                frames = []
+                delays = []
+                frame_count = 0
+                for frame in ImageSequence.Iterator(img):
+                    if frame_count >= MAX_FRAMES:
+                        if message_callback:
+                            message_callback(f"Reached the maximum of {MAX_FRAMES} frames. Additional frames are ignored.")
+                        break
+
+                    frame = frame.convert("RGBA")  # Ensure consistent format
+
+                    # Determine resampling method based on scaling direction
+                    resample_method = (
+                        Image.Resampling.BICUBIC if img_width > new_width or img_height > new_height else Image.Resampling.NEAREST
+                    )
+
+                    resized_frame = frame.resize((new_width, new_height), resample=resample_method)
+
+                    # Paste resized frame onto the blank canvas
+                    positioned_frame = blank_frame.copy()
+                    positioned_frame.paste(resized_frame, (x_offset, y_offset), resized_frame)
+                    frames.append(positioned_frame)
+
+                    # Preserve frame delay (default to 100ms if not provided)
+                    delay = frame.info.get("duration", 100)
+                    delays.append(delay)
+
+                    frame_count += 1
+
+                    # Report progress if callback is provided
+                    if progress_callback:
+                        progress_callback(frame_count, MAX_FRAMES)
+
+                if not frames:
+                    if error_callback:
+                        error_callback("No frames were processed to create the animation.")
+                    return
+
+                # Save the frames as a new WebP animation with preserved delays
+                frames[0].save(
+                    temp_path,
+                    format="WEBP",
+                    save_all=True,
+                    append_images=frames[1:],
+                    loop=0,
+                    duration=delays,
+                    disposal=2  # Clear previous frames
                 )
-                resized_frame = frame.resize((new_width, new_height), resample=resample_method)
 
-                # Paste resized frame onto the blank canvas
-                positioned_frame = blank_frame.copy()
-                positioned_frame.paste(resized_frame, (x_offset, y_offset), resized_frame)
-                frames.append(positioned_frame)
+            # Load the resized GIF/WebP into QMovie
+            movie = QMovie(temp_path)
 
-                # Preserve frame delay (default to 100ms if not provided)
-                delays.append(frame.info.get("duration", 100))
+            # Configure QLabel appearance and alignment
+            self.image_label.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+            self.image_label.setStyleSheet("background-color: transparent; border: none;")
 
-            # Save the frames as a new WebP animation with preserved delays
-            frames[0].save(
-                temp_path,
-                format="WEBP",
-                save_all=True,
-                append_images=frames[1:],
-                loop=0,
-                duration=delays,
-                disposal=2  # Clear previous frames
-            )
+            # Set the QMovie to the QLabel and start the animation
+            self.image_label.setMovie(movie)
+            movie.start()
 
-        # Load the resized GIF into QMovie
-        movie = QMovie(temp_path)
-
-        # Configure QLabel appearance and alignment
-        self.image_label.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
-        self.image_label.setStyleSheet("background-color: transparent; border: none;")
-
-        # Set the QMovie to the QLabel and start the animation
-        self.image_label.setMovie(movie)
-        movie.start()
+        except Exception as e:
+            if error_callback:
+                error_callback(f"An error occurred in display_gif: {e}")
+            else:
+                # If no error_callback is provided, you might want to log the error or handle it differently
+                print(f"An error occurred in display_gif: {e}")
 
 
 

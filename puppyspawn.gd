@@ -244,10 +244,6 @@ func is_in_any_grid(pos: Vector3)->bool:
 	return false
 
 func _spawn_canvas(pos, _offset = 10):
-	if shoulddel:
-		_delete(true)
-		yield (get_tree().create_timer(0.6), "timeout")
-		
 	if current_zone == "main_zone":
 		if (pos.x > 48.571999 - 10 and pos.x < 48.571999 + 10) and (pos.z > - 51.041 - 10 and pos.z < - 51.041 + 10):
 			grid = 1
@@ -709,7 +705,7 @@ func toggle_playback_mode(_message = false):
 	if _message:
 		PlayerData._send_notification("GIF mode changed to: " + mode_names[playback_mode], 0)
 	
-	# If we're switching FROM normal/half/slow INTO manual:
+	# If switching FROM normal/half/slow INTO manual:
 	#   1) Pause if currently playing
 	#   2) Sync manual_frame_index to the last frame we showed in _current_frame_index
 	if prior in [PlaybackMode.NORMAL, PlaybackMode.HALF, PlaybackMode.SLOW] and playback_mode == PlaybackMode.MANUAL:
@@ -717,7 +713,7 @@ func toggle_playback_mode(_message = false):
 			_playing = false
 		manual_frame_index = _current_frame_index
 	
-	# If we're switching FROM manual INTO normal/half/slow:
+	# If switching FROM manual INTO normal/half/slow:
 	#   1) Sync _current_frame_index to manual_frame_index
 	#   2) Do NOT auto-play or reset. The user must press "Play" again if they want to resume.
 	if prior == PlaybackMode.MANUAL and playback_mode in [PlaybackMode.NORMAL, PlaybackMode.HALF, PlaybackMode.SLOW]:
@@ -1030,6 +1026,7 @@ func get_data():
 	else:
 		yield (get_tree().create_timer(1.0 / 4.0), "timeout")
 		_update_walky_talky_menu("ur not in a lobby dummy")
+
 
 func _update_walky_talky_menu(message):
 	

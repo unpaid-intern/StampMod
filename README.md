@@ -6,46 +6,6 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 </p>
 
 
-
-# General Information
-- You can **paste images** into the menu directly or **select a file**
-- Supports art saving and image generation if using [chalks](https://thunderstore.io/c/webfishing/p/hostileonion/chalks/) by the wonderful hostileonion
-- Stamps are automatically adjusted to be **upright relative to the player camera**
-- In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
-- **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
-- Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%appdata%/local/webfishing_stamps_mod` on Windows
-- Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
-- I recommend installing the **Calico mod**! (it can cause stuttering with gifs though)
-- Please dont use Thunderstore Mod Manager
-
-# OH NO ITS NOT LAUNCHING FROM THE GAME (LINUX ONLY)
-
-Follow these steps to get it running:
-
-1. **Open Terminal**  
-2. **Navigate** to the directory:
-   ```
-   /GDWeave/mods/PurplePuppy-Stamps_Linux/imagePawcessor
-   ```
-3. **Make the file executable** by running:
-   ```bash
-   chmod +x imagePawcess
-   ```
-4. **Run the file** with:
-   ```bash
-   ./imagePawcess
-   ```
-   **Alternatively, use your File Manager**:
-   1. Go to `/GDWeave/mods/PurplePuppy-Stamps_Linux/imagePawcessor`.
-   2. Right-click `imagePawcess` and select **Properties**.
-   3. Enable **Allow executing as a program**.
-   4. Double-click the file to run it.
-
-5. **If issues persist**, please report them on my GitHub, including:
-   - Your specific Linux distro  
-   - How you're running the game (Wine, Proton, etc.)  
-
-
 # Keybinds
 > **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
@@ -66,6 +26,19 @@ Follow these steps to get it running:
 - **`BACKSPACE` Key**  
 	- Works as **Ctrl+Z**, undoing the last placed stamps in order.
 
+
+
+# General Information
+- You can **paste images** into the menu directly or **select a file**
+- Supports art saving and image generation if using [chalks](https://thunderstore.io/c/webfishing/p/hostileonion/chalks/) by the wonderful hostileonion
+- Stamps are automatically adjusted to be **upright relative to the player camera**
+- In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
+- **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
+- Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%appdata%/local/webfishing_stamps_mod` on Windows
+- **DONT** move when placing gifs down
+- Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
+- I recommend installing the **Calico mod**! (it can cause stuttering with gifs though)
+- Please dont use Thunderstore Mod Manager
 
 # Image Processing Guide
 
@@ -109,6 +82,34 @@ If you wish to know the location of a specific canvas, please refer to the below
 <p align="left">
   <img src="https://github.com/unpaid-intern/StampMod/blob/main/MAP.png?raw=true" alt="Canvas ID Map"/>
 </p>
+
+
+# OH NO ITS NOT LAUNCHING FROM THE GAME (LINUX ONLY)
+
+Follow these steps to get it running:
+
+1. **Open Terminal**  
+2. **Navigate** to the directory:
+   ```
+   /GDWeave/mods/PurplePuppy-Stamps_Linux/imagePawcessor
+   ```
+3. **Make the file executable** by running:
+   ```bash
+   chmod +x imagePawcess
+   ```
+4. **Run the file** with:
+   ```bash
+   ./imagePawcess
+   ```
+   **Alternatively, use your File Manager**:
+   1. Go to `/GDWeave/mods/PurplePuppy-Stamps_Linux/imagePawcessor`.
+   2. Right-click `imagePawcess` and select **Properties**.
+   3. Enable **Allow executing as a program**.
+   4. Double-click the file to run it.
+
+5. **If issues persist**, please report them on my GitHub, including:
+   - Your specific Linux distro  
+   - How you're running the game (Wine, Proton, etc.)  
 
 
 ## Installation (for the peeps)

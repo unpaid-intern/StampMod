@@ -49,10 +49,15 @@ got ctrl z to function and changed keybinds
 - gif playback speed options
 - took boost and threshold options away from the user because the user cannot be trusted to make competent decisions, done automatically now.
 - fixed for thunderstore mod manager (again!) fuck em
+# 2.2.0
+- placement and menu bugfixes
+- much faster multiframe processing
+- might be the last update / mod for a while, personal stuffs
 
 > future updates:
+- support for mp4 and much longer gifs without crashing
 - better organised save menu and saved stamp sharing
-- longer gifs and video support with potato radio for audio (cuz its funny lmao)
+- support for potato radio for audio (cuz its funny lmao)
 - improved ctrl z logic
 - more stamps off-canvas
 - add an eraser
