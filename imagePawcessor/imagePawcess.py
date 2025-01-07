@@ -1759,7 +1759,7 @@ def hex_to_rgb(hex_str):
 
 # Numba-accelerated function to find the closest color number
 @numba.njit
-def find_closest_color(pixel, color_key_array, color_key_numbers):
+def find_closest_color2(pixel, color_key_array, color_key_numbers):
     """
     Finds the closest color number from color_key_array for the given pixel.
 
@@ -1903,7 +1903,7 @@ def process_and_save_gif(
                     for x in range(width):
                         if mask[y, x]:
                             pixel = rgb_array[y, x]
-                            color_num = find_closest_color(pixel, color_key_rgb, color_key_numbers)
+                            color_num = find_closest_color2(pixel, color_key_rgb, color_key_numbers)
                             Frame1Array[y, x] = color_num
                             first_frame_pixels[y, x] = color_num
 
@@ -1937,7 +1937,7 @@ def process_and_save_gif(
                     for x in range(width):
                         if mask[y, x]:
                             pixel = rgb_array[y, x]
-                            color_num = find_closest_color(pixel, color_key_rgb, color_key_numbers)
+                            color_num = find_closest_color2(pixel, color_key_rgb, color_key_numbers)
                             CurrentFrameArray[y, x] = color_num
 
                 # Find differences between CurrentFrameArray and Frame1Array

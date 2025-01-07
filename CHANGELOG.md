@@ -53,7 +53,8 @@ got ctrl z to function and changed keybinds
 - placement and menu bugfixes
 - much faster multiframe processing
 - might be the last update / mod for a while, personal stuffs
-
+# 2.2.1 
+- fix for k means mapping
 > future updates:
 - support for mp4 and much longer gifs without crashing
 - better organised save menu and saved stamp sharing
