@@ -2,6 +2,9 @@ extends Node
 
 
 onready var _Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new()
+
+
+var stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods = null
 var debug = false
 
 var KeybindsAPI = null
@@ -22,6 +25,7 @@ signal _delete
 signal _play
 signal get_data
 
+var plactor = null
 
 var prefix = "[Stamps Config Handler] "
 
@@ -108,7 +112,6 @@ func set_chalks():
 	save_config()
 	
 	print(prefix, "Chalks set to: ", config_data["chalks"])
-
 
 func check_key_presses():
 	if Input.is_key_pressed(config_data["open_menu"]):
@@ -321,8 +324,15 @@ func check_updates():
 	var file = File.new()
 
 	while true:
-		yield (get_tree().create_timer(2.0), "timeout")
+		yield (get_tree().create_timer(2.6), "timeout")
 		
+		if !stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
+			stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods = get_node_or_null("/root/officerballsthetambourine")
+			
+		if !chalks:
+			chalks = get_node_or_null("/root/hostileonionchalks")
+			if chalks:
+				set_chalks()
 		
 		var needs_update = false
 		if file.open(config_path, File.READ) == OK:
@@ -373,6 +383,11 @@ func check_updates():
 				print(prefix, "Player was removed. Respawned _Spawn node.")
 			was_player_present = false
 		else:
+			if !was_player_present:
+				send_keybind()
+				if stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
+					#init_player()
+					pass
 			was_player_present = true
 			in_game = true
 
@@ -427,3 +442,24 @@ func _gif():
 
 func _ctrlz():
 	emit_signal("_delete")
+	
+
+func init_player(player: Actor):
+	var loadedin = false
+	if not loadedin: for i in 5:
+		if loadedin: break
+		yield (get_tree().create_timer(1), "timeout")
+		if get_tree().get_nodes_in_group("controlled_player").size() > 0:
+			for actor in get_tree().get_nodes_in_group("controlled_player"):
+				if not is_instance_valid(actor): return 
+				else:
+					if not loadedin:
+						plactor = actor
+						loadedin = true
+	
+func send_keybind():
+	var key_name = OS.get_scancode_string(config_data["open_menu"])
+	if key_name == "":
+		return
+	yield (get_tree().create_timer(5), "timeout")
+	PlayerData._send_notification("Press " + key_name + " for Stamps Menu :3", 0)

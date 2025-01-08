@@ -3246,9 +3246,9 @@ class MainWindow(QMainWindow):
         self.clip_button.clicked.connect(lambda: self.open_image_from_clipboard())
 
 
-        self.exit_button = QPushButton("Mod Info")
+        self.exit_button = QPushButton("Keybinds / Info")
         self.exit_button.setStyleSheet(button_stylesheet)
-        self.exit_button.setMinimumSize(160, 60)
+        self.exit_button.setMinimumSize(200, 60)
         #self.exit_button.clicked.connect(self.request_and_monitor_canvas)
         bottom_button_layout.addWidget(self.exit_button)
         self.exit_button.clicked.connect(self.open_website)

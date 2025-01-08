@@ -74,6 +74,7 @@ var wait = false
 
 var debug = false
 
+
 func _ready():
 	if debug:
 		img_path = "res://mods/PurplePuppy-Stamps/game_data/current_stamp_data/stamp.txt"
@@ -83,7 +84,7 @@ func _ready():
 		img_path = key_handler.img_path
 		frames_path = key_handler.frames_path
 		gui_path = key_handler.gui_path
-
+	
 	key_handler.connect("_play", self, "toggle_playback")
 	key_handler.connect("spawn_stamp", self, "spawn_stamp")
 	key_handler.connect("open_menu", self, "open_menu")
@@ -91,6 +92,7 @@ func _ready():
 	key_handler.connect("get_data", self, "get_data")
 	_PlayerData.connect("_chalk_update", self, "_chalk_update")
 	ray_detector = ray_detector_scene.instance()
+	
 
 func re_ready():
 	_PlayerData = get_node_or_null("/root/PlayerData")
@@ -103,6 +105,7 @@ func re_ready():
 
 func _chalk_update(pos):
 	last_mouse_pos = pos
+
 
 func _delete(gif = false):
 	if not update_dynamic_nodes():
@@ -117,23 +120,24 @@ func _delete(gif = false):
 		isgif = false
 	var delete = []
 	var normal = true
+	if key_handler.stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
+		ctrlz()
+		return
 	for i in range(3):
 		for actor in Network.OWNED_ACTORS:
 			if actor.actor_type == "canvas":
 				normal = false
-				if not delete.has(actor.actor_id):
-					delete.append(actor.actor_id)
+				if not delete.has(actor):
+					delete.append(actor)
 	if normal:
 		ctrlz()
 	else:
 		for actor in delete:
-			_Player._wipe_actor(actor)
-
+			_Player._wipe_actor(actor.actor_id)
 		for i in range(5):
 			for actor in delete:
-				Network._send_actor_action(actor, "_wipe_actor", [actor])
+				Network._send_actor_action(actor, "_wipe_actor", [actor.actor_id])
 				yield (get_tree().create_timer(1.0 / 80.0), "timeout")
-
 		delete.clear()
 		_canvas_id.clear()
 		_Chalknode = null
@@ -189,7 +193,7 @@ func open_menu():
 		wait = false
 		return 
 		
-	PlayerData._send_notification("Stamp Menu Launching! (give it a sec)", 0)
+	PlayerData._send_notification("Stamps menu launching externally!", 0)
 	
 	resetwait()
 	
@@ -257,6 +261,11 @@ func _spawn_canvas(pos, _offset = 10):
 			grid = 0
 	else:
 		grid = 0
+	
+	if grid == 0 && key_handler.stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
+			PlayerData._send_notification("feature incompatable with \"thetamborine\" mod", 1)
+			PlayerData._send_notification("please uninstall it if you wish to place off-canvas", 1)
+			return false
 		
 	var offsets = []
 	if four and grid == 0:
@@ -356,8 +365,9 @@ func _spawn_canvas(pos, _offset = 10):
 				game_tile = _Chalknode.get_node("Viewport/TileMap")
 			else:
 				print("Failed to retrieve chalknode")
-				
-							
+	return true
+
+
 func _get_player_facing_direction():
 	if cam:
 		var forward = cam.global_transform.basis.z.normalized()
@@ -474,9 +484,9 @@ func check_image_resolution(file_path, pos):
 					if imgx <= 20 and imgy <= 20:
 						origin = pos
 						four = false
-						_spawn_canvas(origin)
-						display_image(file_path, origin)
-						_chalk_send()
+						if _spawn_canvas(origin):
+							display_image(file_path, origin)
+							_chalk_send()
 						return 
 					else:
 						var _offset = null
@@ -489,9 +499,9 @@ func check_image_resolution(file_path, pos):
 						if new_canvas:
 							origin = pos
 							four = true
-							_spawn_canvas(origin, _offset)
-							display_image(file_path, origin)
-							_chalk_send()
+							if _spawn_canvas(origin, _offset):
+								display_image(file_path, origin)
+								_chalk_send()
 						return 
 						
 			if ray_detector and not ogaboga:
@@ -520,9 +530,9 @@ func check_image_resolution(file_path, pos):
 			if imgx <= 20 and imgy <= 20:
 				origin = pos
 				four = false
-				_spawn_canvas(origin)
-				display_image(file_path, origin)
-				_chalk_send()
+				if _spawn_canvas(origin):
+					display_image(file_path, origin)
+					_chalk_send()
 			else:
 				var _offset = null
 				if imgy >= imgx:
@@ -534,9 +544,9 @@ func check_image_resolution(file_path, pos):
 				if new_canvas:
 					origin = pos
 					four = true
-					_spawn_canvas(origin, _offset)
-					display_image(file_path, origin)
-					_chalk_send()
+					if _spawn_canvas(origin, _offset):
+						display_image(file_path, origin)
+						_chalk_send()
 		else:
 			_delete(true)
 			yield (get_tree().create_timer(0.6), "timeout")
@@ -544,9 +554,9 @@ func check_image_resolution(file_path, pos):
 			if imgx <= 20 and imgy <= 20:
 				origin = pos
 				four = false
-				_spawn_canvas(origin)
-				display_image(file_path, origin)
-				_chalk_send()
+				if _spawn_canvas(origin):
+					display_image(file_path, origin)
+					_chalk_send()
 			else:
 				var _offset = null
 				if imgy >= imgx:
@@ -558,9 +568,9 @@ func check_image_resolution(file_path, pos):
 				if new_canvas:
 					origin = pos
 					four = true
-					_spawn_canvas(origin, _offset)
-					display_image(file_path, origin)
-					_chalk_send()
+					if _spawn_canvas(origin, _offset):
+						display_image(file_path, origin)
+						_chalk_send()
 	file.close()
 
 func display_image(file_path, pos):
@@ -773,7 +783,6 @@ func newgif():
 	file.close()
 	another = true
 	processing = false
-	playback_mode = PlaybackMode.NORMAL
 	
 	if frame_data.size() != _framecount:
 		print("WTF")
@@ -784,7 +793,6 @@ func newgif():
 func _play():
 	while _playing:
 		if playback_mode == PlaybackMode.MANUAL:
-			# In manual mode, we exit and let toggle_playback() do single-frame stepping
 			return
 		else:
 			# Draw the current frame
@@ -794,11 +802,11 @@ func _play():
 			var delay = frame_delays[_current_frame_index] / 1000.0
 			match playback_mode:
 				PlaybackMode.NORMAL:
-					yield(get_tree().create_timer(delay), "timeout")
+					yield (get_tree().create_timer(delay), "timeout")
 				PlaybackMode.HALF:
-					yield(get_tree().create_timer(delay * 2), "timeout")
+					yield (get_tree().create_timer(delay * 2), "timeout")
 				PlaybackMode.SLOW:
-					yield(get_tree().create_timer(delay * 10), "timeout")
+					yield (get_tree().create_timer(delay * 10), "timeout")
 			
 			# Move to next frame
 			_current_frame_index += 1

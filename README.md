@@ -38,6 +38,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - **DONT** move when placing gifs down
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
 - I recommend installing the **Calico mod**! (it can cause stuttering with gifs though)
+- Incompatable with "thetamborine" mod by officer_balls (it patches the game in the way that breaks my actor removal system)
 - Please dont use Thunderstore Mod Manager
 
 # Image Processing Guide

@@ -55,10 +55,13 @@ got ctrl z to function and changed keybinds
 - might be the last update / mod for a while, personal stuffs
 # 2.2.1 
 - fix for k means mapping
+# 2.2.2
+- added disclaimer for thetamborine incompatability
 > future updates:
+- canvas locking for hosts
 - support for mp4 and much longer gifs without crashing
 - better organised save menu and saved stamp sharing
 - support for potato radio for audio (cuz its funny lmao)
 - improved ctrl z logic
-- more stamps off-canvas
+- more stamps off-canvas (especially for hosts)
 - add an eraser
