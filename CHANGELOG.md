@@ -70,4 +70,4 @@ got ctrl z to function and changed keybinds
 - improved ctrl z logic
 - more stamps off-canvas (especially for hosts)
 > in that order, at which point i think im happy to move on to other projects outside of webfishing. i wanted to make something cool and i did!
->but ive lost interest in making mods for this community (mostly because of officer_balls's hostility. issues between us really should never involve anyone else)
+>but ive lost interest in making mods for this community (mostly due to unwarrented hostility from other mod makers. issues of this manner should never involve anyone else)
