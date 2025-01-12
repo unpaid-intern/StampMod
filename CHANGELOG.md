@@ -57,11 +57,17 @@ got ctrl z to function and changed keybinds
 - fix for k means mapping
 # 2.2.2
 - added disclaimer for thetamborine incompatability
-> future updates:
+# 2.3.0
+- fixed bug when placing more than one canvas down, causing bottom half to not display properly server side.
+# future updates will be slow and may not happen at all, but could include:
+- change backspace to actual ctrl-z keybind (why was it not that before??)
+- longer multiframe support
+- mp4 support
+- canvasAPI for modders if eli doesnt just make one himself lol (sorry)
+- separate mod for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
 - canvas locking for hosts
-- support for mp4 and much longer gifs without crashing
-- better organised save menu and saved stamp sharing
-- support for potato radio for audio (cuz its funny lmao)
+- better organised save menu
 - improved ctrl z logic
 - more stamps off-canvas (especially for hosts)
-- add an eraser
+> in that order, at which point i think im happy to move on to other projects outside of webfishing. i wanted to make something cool and i did!
+>but ive lost interest in making mods for this community (mostly because of officer_balls's hostility. issues between us really should never involve anyone else)

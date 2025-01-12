@@ -19,9 +19,9 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 	- Spawns a stamp on **Canvas 1**, **Canvas 2**, **Canvas 3**, or **Canvas 4** if combined with `1`, `2`, `3`, or `4`, respectively.
 
 - **`Minus` Key (-)**  
-	- Toggles GIF playback if a GIF has been placed down.  
+	- Toggles multiframe playback if a GIF/Video has been placed down.  
 	- When `SHIFT` is held, toggles playback speed instead.  
-	- When `CTRL` is held, resets the GIF to play from frame one.
+	- When `CTRL` is held, resets GIF/Video to play from frame one.
 
 - **`BACKSPACE` Key**  
 	- Works as **Ctrl+Z**, undoing the last placed stamps in order.
@@ -32,13 +32,13 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - You can **paste images** into the menu directly or **select a file**
 - Supports art saving and image generation if using [chalks](https://thunderstore.io/c/webfishing/p/hostileonion/chalks/) by the wonderful hostileonion
 - Stamps are automatically adjusted to be **upright relative to the player camera**
+- you might get temporarily kicked for spawning canvases in cove servers (they are considered an illegal actor)
 - In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
 - **Off-canvas**: a maximum of four chalk canvases (200*200) can be placed
 - Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%appdata%/local/webfishing_stamps_mod` on Windows
 - **DONT** move when placing gifs down
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
 - I recommend installing the **Calico mod**! (it can cause stuttering with gifs though)
-- Incompatable with "thetamborine" mod by officer_balls (it patches the game in the way that breaks my actor removal system)
 - Please dont use Thunderstore Mod Manager
 
 # Image Processing Guide

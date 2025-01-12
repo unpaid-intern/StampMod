@@ -247,7 +247,7 @@ func is_in_any_grid(pos: Vector3)->bool:
 			return true
 	return false
 
-func _spawn_canvas(pos, _offset = 10):
+func _spawn_canvas(pos, file_path, _offset = 10):
 	if current_zone == "main_zone":
 		if (pos.x > 48.571999 - 10 and pos.x < 48.571999 + 10) and (pos.z > - 51.041 - 10 and pos.z < - 51.041 + 10):
 			grid = 1
@@ -306,8 +306,7 @@ func _spawn_canvas(pos, _offset = 10):
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
 			print("Created new canvas at ", canvas_pos)
-			
-			
+			yield (get_tree().create_timer(1.0/12.0), "timeout")
 			var chalknode = _actor_man._get_actor_by_id(new_canvas_id)
 			if chalknode:
 				var smutnode = chalknode.get_node("chalk_canvas")
@@ -365,8 +364,8 @@ func _spawn_canvas(pos, _offset = 10):
 				game_tile = _Chalknode.get_node("Viewport/TileMap")
 			else:
 				print("Failed to retrieve chalknode")
-	return true
-
+	display_image(file_path, pos)
+	_chalk_send()
 
 func _get_player_facing_direction():
 	if cam:
@@ -375,26 +374,6 @@ func _get_player_facing_direction():
 			return "right" if forward.x > 0 else "left"
 		else:
 			return "down" if forward.z > 0 else "up"
-
-func clear_canvas():
-	var total_steps = null
-	if imgy > imgx:
-		total_steps = imgy * 10
-	else:
-		total_steps = imgx * 10
-	
-	for i in range(total_steps):
-		var z = i * 0.1
-		for j in range(total_steps):
-			var x = j * 0.1
-			var off
-			match dir:
-				"down": off = Vector3(x, 0, - z) + base + origin
-				"left": off = Vector3(z, 0, x) + base + origin
-				"right": off = Vector3( - z, 0, - x) + base + origin
-				"up": off = Vector3( - x, 0, z) + base + origin
-			_chalk_draw(off, - 1)
-	_chalk_send()
 
 func check_image_resolution(file_path, pos):
 	dir = _get_player_facing_direction()
@@ -484,9 +463,9 @@ func check_image_resolution(file_path, pos):
 					if imgx <= 20 and imgy <= 20:
 						origin = pos
 						four = false
-						if _spawn_canvas(origin):
-							display_image(file_path, origin)
-							_chalk_send()
+						_spawn_canvas(origin, file_path)
+						
+							
 						return 
 					else:
 						var _offset = null
@@ -499,9 +478,9 @@ func check_image_resolution(file_path, pos):
 						if new_canvas:
 							origin = pos
 							four = true
-							if _spawn_canvas(origin, _offset):
-								display_image(file_path, origin)
-								_chalk_send()
+							_spawn_canvas(origin, file_path, _offset)
+							
+								
 						return 
 						
 			if ray_detector and not ogaboga:
@@ -530,9 +509,7 @@ func check_image_resolution(file_path, pos):
 			if imgx <= 20 and imgy <= 20:
 				origin = pos
 				four = false
-				if _spawn_canvas(origin):
-					display_image(file_path, origin)
-					_chalk_send()
+				_spawn_canvas(origin, file_path)
 			else:
 				var _offset = null
 				if imgy >= imgx:
@@ -544,9 +521,7 @@ func check_image_resolution(file_path, pos):
 				if new_canvas:
 					origin = pos
 					four = true
-					if _spawn_canvas(origin, _offset):
-						display_image(file_path, origin)
-						_chalk_send()
+					_spawn_canvas(origin, file_path, _offset)
 		else:
 			_delete(true)
 			yield (get_tree().create_timer(0.6), "timeout")
@@ -554,9 +529,9 @@ func check_image_resolution(file_path, pos):
 			if imgx <= 20 and imgy <= 20:
 				origin = pos
 				four = false
-				if _spawn_canvas(origin):
-					display_image(file_path, origin)
-					_chalk_send()
+				_spawn_canvas(origin, file_path)
+				
+					
 			else:
 				var _offset = null
 				if imgy >= imgx:
@@ -568,9 +543,9 @@ func check_image_resolution(file_path, pos):
 				if new_canvas:
 					origin = pos
 					four = true
-					if _spawn_canvas(origin, _offset):
-						display_image(file_path, origin)
-						_chalk_send()
+					_spawn_canvas(origin, file_path, _offset)
+					
+						
 	file.close()
 
 func display_image(file_path, pos):

@@ -4,7 +4,7 @@ extends Node
 onready var _Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new()
 
 
-var stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods = null
+var stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods = null
 var debug = false
 
 var KeybindsAPI = null
@@ -326,8 +326,12 @@ func check_updates():
 	while true:
 		yield (get_tree().create_timer(2.6), "timeout")
 		
-		if !stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
-			stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods = get_node_or_null("/root/officerballsthetambourine")
+		if !stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
+			stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods = get_node_or_null("/root/officerballsthetambourine")
+			
+			#if ur here and confused why im trying to detect this version of officer ball's mod, its because it contains a patch that breaks my actor removal system and would otherwise make my mod appear to be broken. this was fixed by balls in the most recent version of tamborine, which goes under a different name.
+			#this shouldnt have ever been "drama". i dont understand why this wasnt just between me and him. its a mystery to me why officer balls believes i wronged him in any way. especially considering he initially said he wasnt planning on making our mods compatable.  enjoy my mod, cheers!
+			
 			
 		if !chalks:
 			chalks = get_node_or_null("/root/hostileonionchalks")
@@ -385,9 +389,6 @@ func check_updates():
 		else:
 			if !was_player_present:
 				send_keybind()
-				if stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
-					#init_player()
-					pass
 			was_player_present = true
 			in_game = true
 
@@ -444,22 +445,10 @@ func _ctrlz():
 	emit_signal("_delete")
 	
 
-func init_player(player: Actor):
-	var loadedin = false
-	if not loadedin: for i in 5:
-		if loadedin: break
-		yield (get_tree().create_timer(1), "timeout")
-		if get_tree().get_nodes_in_group("controlled_player").size() > 0:
-			for actor in get_tree().get_nodes_in_group("controlled_player"):
-				if not is_instance_valid(actor): return 
-				else:
-					if not loadedin:
-						plactor = actor
-						loadedin = true
-	
+
 func send_keybind():
 	var key_name = OS.get_scancode_string(config_data["open_menu"])
 	if key_name == "":
 		return
-	yield (get_tree().create_timer(5), "timeout")
+	yield (get_tree().create_timer(1), "timeout")
 	PlayerData._send_notification("Press " + key_name + " for Stamps Menu :3", 0)
