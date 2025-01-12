@@ -2809,7 +2809,8 @@ class MainWindow(QMainWindow):
             "The roots are growing",
             "\"A mere setback.\" -grandma ",
             "\"shrivel\" -grandma ",
-            "Gnarp gnap"
+            "Gnarp gnap",
+            "im tired"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
@@ -5554,12 +5555,12 @@ class MainWindow(QMainWindow):
     def resize_slider_changed(self, value):
         self.resize_value_label.setText(str(value))
         if not self.manual_change and not self.is_gif:
-            if value > 200:
-                if "Jarvis Dither" in [method["name"] for method in self.processing_methods]:
+            if value > 199:
+                if "Hybrid Dither" in [method["name"] for method in self.processing_methods]:
                     self.processing_combobox.blockSignals(True)  # Block signals
-                    self.processing_combobox.setCurrentText("Jarvis Dither")
+                    self.processing_combobox.setCurrentText("Hybrid Dither")
                     self.processing_combobox.blockSignals(False)  # Unblock signals
-                    self.processing_method_changed("Jarvis Dither", strength=False, manual=False)
+                    self.processing_method_changed("Hybrid Dither", strength=False, manual=False)
             elif value > 50:
                 if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
                     self.processing_combobox.blockSignals(True)
@@ -6316,7 +6317,7 @@ class MainWindow(QMainWindow):
 
                 if max_dimension > 200:
                     self.resize_slider.setMaximum(200)
-                    self.resize_slider.setValue(100)
+                    self.resize_slider.setValue(96)
                 else:
                     self.resize_slider.setMaximum(200)
                     self.resize_slider.setValue(max_dimension)
@@ -6335,11 +6336,11 @@ class MainWindow(QMainWindow):
                 max_dimension = max(image_width, image_height)  # Use the larger dimension
 
                 # Adjust the resize slider based on the maximum dimension
-                if max_dimension > 400:
-                    self.resize_slider.setMaximum(400)
+                if max_dimension > 200:
+                    self.resize_slider.setMaximum(200)
                     self.resize_slider.setValue(128)
                 else:
-                    self.resize_slider.setMaximum(400)
+                    self.resize_slider.setMaximum(200)
                     self.resize_slider.setValue(max_dimension)
                     self.resize_slider_changed(max_dimension)
 

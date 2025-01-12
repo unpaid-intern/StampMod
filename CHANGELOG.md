@@ -58,7 +58,7 @@ got ctrl z to function and changed keybinds
 # 2.2.2
 - added disclaimer for thetamborine incompatability
 # 2.3.0
-- fixed bug when placing more than one canvas down, causing bottom half to not display properly server side.
+- took away ability to have images larger than 200*200 as only 2 chalk canvases are allowed server side now?? change i didnt know ab.
 # future updates will be slow and may not happen at all, but could include:
 - change backspace to actual ctrl-z keybind (why was it not that before??)
 - longer multiframe support
