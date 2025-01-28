@@ -26,6 +26,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - **`CTRL + Z` Keys**  
 	- Works as **Ctrl+Z**, undoing the last placed stamps in order.
   - If this keybind is changed, CTRL will not need to be held.
+  - If this isn't working, try the `BACKSPACE` key.
 
 
 
