@@ -57,10 +57,18 @@ got ctrl z to function and changed keybinds
 - fix for k means mapping
 # 2.2.2
 - added disclaimer for thetamborine incompatability
-# 2.3.0
+# 2.2.3
 - took away ability to have images larger than 200*200 as only 2 chalk canvases are allowed server side now?? change i didnt know ab.
+# 2.2.4 
+- fixed a mistake i made...
+# 2.2.5
+- now can utilize 2 canvases per image
+- improved preprocessing
+- changing keybind to z for undo will make it ctrl z
+- default keybind will now be z
+# 2.2.6
+- fixed error with vertical right facing images utilizing 2 canvases ugh
 # future updates will be slow and may not happen at all, but could include:
-- change backspace to actual ctrl-z keybind (why was it not that before??)
 - longer multiframe support
 - mp4 support
 - canvasAPI for modders if eli doesnt just make one himself lol (sorry)
@@ -70,4 +78,3 @@ got ctrl z to function and changed keybinds
 - improved ctrl z logic
 - more stamps off-canvas (especially for hosts)
 > in that order, at which point i think im happy to move on to other projects outside of webfishing. i wanted to make something cool and i did!
->but ive lost interest in making mods for this community (mostly due to unwarrented hostility / actions taken by another mod maker. issues of this manner should never involve anyone else from the wider community)
