@@ -851,9 +851,9 @@ func _chalk_draw(pos, color):
 						_map_and_draw(1, pos, color, send_load_2)
 				"right":
 					if pos.x <= origin.x:
-						_map_and_draw(1, pos, color, send_load_2)
-					elif pos.x > origin.x:
 						_map_and_draw(0, pos, color, send_load)
+					elif pos.x > origin.x:
+						_map_and_draw(1, pos, color, send_load_2)
 				_:
 					pass
 		else: 
