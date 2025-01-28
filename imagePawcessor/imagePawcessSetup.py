@@ -25,6 +25,7 @@ build_exe_options = {
         "PIL.ImageFilter",
         "PIL.ImageDraw",
         "numpy",
+        "numba",
         "shutil",
         "scipy",
         "sklearn",

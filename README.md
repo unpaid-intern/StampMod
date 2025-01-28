@@ -18,13 +18,14 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 	- Spawns a stamp at the dock if `CTRL` is held.  
 	- Spawns a stamp on **Canvas 1**, **Canvas 2**, **Canvas 3**, or **Canvas 4** if combined with `1`, `2`, `3`, or `4`, respectively.
 
-- **`Minus` Key (-)**  
+- **`MINUS` Key (-)**  
 	- Toggles multiframe playback if a GIF/Video has been placed down.  
 	- When `SHIFT` is held, toggles playback speed instead.  
 	- When `CTRL` is held, resets GIF/Video to play from frame one.
 
-- **`BACKSPACE` Key**  
+- **`CTRL + Z` Keys**  
 	- Works as **Ctrl+Z**, undoing the last placed stamps in order.
+  - If this keybind is changed, CTRL will not need to be held.
 
 
 

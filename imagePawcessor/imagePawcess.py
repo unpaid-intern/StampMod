@@ -10,9 +10,7 @@ import numba
 from pathlib import Path
 import socket
 from filelock import FileLock, Timeout
-import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
-from functools import partial
 import webbrowser
 import cv2 
 # Image processing libraries
@@ -144,6 +142,7 @@ def prepare_image(img):
     return img
 
 
+
 ###############################################################################
 #                   Utility and Helper Functions                              #
 ###############################################################################
@@ -226,47 +225,124 @@ def apply_gamma_correction(rgb_image_uint8, gamma):
     return rgb_image_uint8
 
 
-def apply_unsharp_mask(rgb_image_uint8, unsharp_strength, unsharp_radius):
+def apply_unsharp_mask(
+    image,
+    unsharp_strength=1.0,
+    unsharp_radius=1.0,
+    edge_threshold=5
+):
     """
-    Apply unsharp masking for edge enhancement.
+    Apply unsharp mask only on the luminance channel (Lab)
+    and only where edges exceed `edge_threshold`.
     """
-    if unsharp_strength > 0:
-        blurred = cv2.GaussianBlur(rgb_image_uint8, (0, 0), unsharp_radius)
-        sharpened = cv2.addWeighted(rgb_image_uint8, 1 + unsharp_strength, 
-                                    blurred, -unsharp_strength, 0)
-        return sharpened
+    if unsharp_strength <= 0:
+        return image
+
+    # Convert BGR → Lab
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2Lab)
+    L, A, B = cv2.split(lab)
+
+    # Blur just the L channel
+    blurred_L = cv2.GaussianBlur(L, (0, 0), unsharp_radius)
+
+    # Compute a mask of where differences exceed edge_threshold
+    diff = cv2.absdiff(L, blurred_L)
+    _, edge_mask = cv2.threshold(diff, edge_threshold, 255, cv2.THRESH_BINARY)
+
+    # Sharpen L channel
+    L_sharp = cv2.addWeighted(L, 1.0 + unsharp_strength,
+                              blurred_L, -unsharp_strength, 0)
+
+    # Combine original L where there's no significant edge
+    L_combined = np.where(edge_mask > 0, L_sharp, L).astype(np.uint8)
+
+    # Re-merge into Lab and convert back to BGR
+    lab_sharpened = cv2.merge([L_combined, A, B])
+    sharpened_bgr = cv2.cvtColor(lab_sharpened, cv2.COLOR_Lab2BGR)
+
+    return sharpened_bgr
+
+
+
+def apply_clahe(
+    rgb_image_uint8,
+    clahe_clip_limit=3.0,
+    clahe_grid_size=8,
+    gamma=0.9,
+    color_boost=1.8,
+    range_min=10,
+    range_max=245,
+):
+    """
+    Aggressive color + contrast transformation to:
+      - Heavily increase color saturation
+      - Reduce pure black/white areas
+      - Retain local contrast by applying CLAHE on L-channel in Lab space
+
+    :param rgb_image_uint8: 3-channel image in RGB order, dtype=uint8
+    :param clahe_clip_limit: Clip limit for CLAHE
+    :param clahe_grid_size: TileGridSize for CLAHE
+    :param color_boost: Factor to multiply the a/b channels (saturation increase)
+    :param range_min: Minimum L-channel value after rescaling (to avoid pure black)
+    :param range_max: Maximum L-channel value after rescaling (to avoid pure white)
+    :param gamma: Gamma correction factor (<1 => brighten midtones, >1 => darken)
+    :return: Strongly color-boosted and contrast-adjusted image, dtype=uint8
+    """
+
+    # 1) Convert from RGB to Lab
+    lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab_image)
+
+    # 2) Apply CLAHE on L channel
+    clahe = cv2.createCLAHE(
+        clipLimit=clahe_clip_limit,
+        tileGridSize=(clahe_grid_size, clahe_grid_size)
+    )
+    l_eq = clahe.apply(l_channel)
+
+    # 3) Force L channel away from pure 0 or 255 by rescaling:
+    #    - First get min and max in the L-channel after CLAHE
+    L_min, L_max = float(l_eq.min()), float(l_eq.max())
+    if L_max > L_min:  # avoid division-by-zero
+        # clamp to actual min/max
+        l_clamped = np.clip(l_eq, L_min, L_max).astype(np.float32)
+        # scale to [range_min .. range_max]
+        scale = (range_max - range_min) / (L_max - L_min)
+        l_rescaled = range_min + (l_clamped - L_min) * scale
+        l_eq = np.clip(l_rescaled, 0, 255).astype(np.uint8)
     else:
-        return rgb_image_uint8
+        # if the L channel is flat (rare), just keep it as is
+        l_eq = l_eq.astype(np.uint8)
 
+    # 4) Gamma correction on L to further avoid large dark areas (gamma<1 => brighten)
+    #    Build a LUT for [0..255].
+    if abs(gamma - 1.0) > 1e-3:
+        inv_gamma = 1.0 / gamma
+        lut = np.array([
+            ( (i / 255.0) ** inv_gamma ) * 255.0 for i in range(256)
+        ]).astype("uint8")
+        l_eq = cv2.LUT(l_eq, lut)
 
-def apply_clahe(rgb_image_uint8, clahe_clip_limit, clahe_grid_size, use_lab_local):
-    """
-    Apply CLAHE (Contrast Limited Adaptive Histogram Equalization).
-    If use_lab_local=True, do it on L-channel in LAB space. Otherwise, per-channel in RGB.
-    """
-    if use_lab_local:
-        lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab_image)
+    # 5) Strongly boost colors in a/b channels:
+    #    - Shift them around 128 (the neutral point in Lab)
+    #    - Multiply to amplify saturation
+    #    - Shift back, and clamp to valid [0..255]
+    a_float = a_channel.astype(np.float32) - 128.0
+    b_float = b_channel.astype(np.float32) - 128.0
 
-        clahe = cv2.createCLAHE(
-            clipLimit=clahe_clip_limit, 
-            tileGridSize=(clahe_grid_size, clahe_grid_size)
-        )
-        l_channel = clahe.apply(l_channel)
+    a_boosted = np.clip(a_float * color_boost, -128, 127) + 128.0
+    b_boosted = np.clip(b_float * color_boost, -128, 127) + 128.0
 
-        merged_lab = cv2.merge((l_channel, a_channel, b_channel))
-        output = cv2.cvtColor(merged_lab, cv2.COLOR_LAB2RGB)
-    else:
-        # Alternatively, apply CLAHE to each channel in RGB
-        channels = cv2.split(rgb_image_uint8)
-        clahe = cv2.createCLAHE(
-            clipLimit=clahe_clip_limit, 
-            tileGridSize=(clahe_grid_size, clahe_grid_size)
-        )
-        clahe_channels = [clahe.apply(ch) for ch in channels]
-        output = cv2.merge(clahe_channels)
+    a_boosted = np.clip(a_boosted, 0, 255).astype(np.uint8)
+    b_boosted = np.clip(b_boosted, 0, 255).astype(np.uint8)
 
-    return output
+    # 6) Merge back into Lab space
+    lab_merged = cv2.merge((l_eq, a_boosted, b_boosted))
+
+    # 7) Convert Lab back to RGB
+    output_rgb = cv2.cvtColor(lab_merged, cv2.COLOR_LAB2RGB)
+
+    return output_rgb
 
 
 def restore_non_opaque_pixels(rgb_image_uint8, original_rgb, opaque_mask):
@@ -287,10 +363,8 @@ def auto_brightness_rgb(rgb_image_uint8, opaque_mask):
     A minimal 'auto brightness' approach in RGB:
     - We measure the average luminance of opaque pixels.
     - If average is far from ~128, we shift the entire image up/down accordingly.
-    - We clamp that shift to avoid major distortions.
     """
     float_img = rgb_image_uint8.astype(np.float32)
-    # Only measure on opaque pixels
     lum = 0.299 * float_img[opaque_mask, 0] + \
           0.587 * float_img[opaque_mask, 1] + \
           0.114 * float_img[opaque_mask, 2]
@@ -324,7 +398,6 @@ def auto_brightness_lab(rgb_image_uint8, opaque_mask):
 
     target_l = 128.0
     diff = target_l - avg_l
-    # clamp shift
     diff = np.clip(diff, -30, 30)
 
     l_channel[opaque_mask] += diff
@@ -334,130 +407,75 @@ def auto_brightness_lab(rgb_image_uint8, opaque_mask):
     out = cv2.cvtColor(merged, cv2.COLOR_LAB2RGB)
     return out
 
-###############################################################################
-#                Restoring Flat Patches After Unsharp (NEW)                  #
-###############################################################################
-
-def restore_flat_patches(rgb_image_uint8, patch_size=3, std_threshold=2.0):
-    """
-    Attempt to detect areas that are nearly uniform (flat color) 
-    and restore them to a single color after unsharp.
-
-    Implementation Outline:
-    - We compute local standard deviation in a (patch_size x patch_size) region around each pixel.
-    - If std < std_threshold, we unify that patch to its average color.
-    - For an "art image", this helps flatten areas that should remain uniform 
-      after unsharp might have added micro-contrasts.
-
-    NOTE:
-    - This is a naive approach. We do a pass where for each pixel we check 
-      a local region. If it's uniform, we set that entire region to the average. 
-    - This can be computationally expensive for large images. 
-    - Tweak patch_size and std_threshold to taste.
-    """
-
-    h, w, c = rgb_image_uint8.shape
-    if c < 3:
-        return rgb_image_uint8  # no change for grayscale or invalid
-
-    # Convert to float for calculations
-    float_img = rgb_image_uint8.astype(np.float32)
-    half = patch_size // 2
-
-    out_img = float_img.copy()
-
-    # For each pixel, measure the local std. If it's under threshold => unify.
-    for y in range(half, h - half):
-        for x in range(half, w - half):
-            # Extract local patch
-            y_start, y_end = y - half, y + half + 1
-            x_start, x_end = x - half, x + half + 1
-
-            patch = float_img[y_start:y_end, x_start:x_end, :]  # shape => (patch_size, patch_size, 3)
-            patch_std = np.std(patch, axis=(0,1))  # std for R,G,B channels
-            # We could combine them or check each; let's average them for a single measure
-            mean_std = np.mean(patch_std)
-
-            if mean_std < std_threshold:
-                # unify patch to average
-                patch_mean = np.mean(patch, axis=(0,1))
-                out_img[y_start:y_end, x_start:x_end, :] = patch_mean
-
-    return np.clip(out_img, 0, 255).astype(np.uint8)
 
 ###############################################################################
 #           Brightness & Range Adjustments (with minimal color-cast fix)      #
 ###############################################################################
 
-def adjust_brightness_and_range_rgb(rgb_image_uint8, opaque_mask, brightness, 
+def adjust_brightness_and_range_rgb(rgb_image_uint8, opaque_mask, user_brightness, 
                                     min_brightness, max_brightness):
-    """
-    Adjust brightness in RGB space, then do a rough range alignment. 
-    If chalks_colors==True => auto brightness, skip user brightness.
-    """
-    global chalks_colors
 
     float_img = rgb_image_uint8.astype(np.float32)
 
-    if chalks_colors:
-        # Use an automatic approach, ignoring global brightness
-        return auto_brightness_rgb(rgb_image_uint8, opaque_mask)
+    # (1) Convert to Lab to do the user brightness shift
+    lab = cv2.cvtColor(float_img.astype(np.uint8), cv2.COLOR_RGB2LAB)
+    l_channel, a_channel, b_channel = cv2.split(lab)
 
-    # -------------- (Original Logic) --------------
-    # 1) Basic brightness shift
-    if abs(brightness - 0.5) > 1e-5:
-        shift_val = (brightness - 0.5) * 100
-        float_img[opaque_mask] += shift_val
+    shift_val = (user_brightness - 0.5) * 100.0
+    l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + shift_val, 0, 255)
 
-    # 2) Rough brightness "range" alignment
-    lum = np.mean(float_img[opaque_mask], axis=1)  # shape (#pixels,3) => average R,G,B
-    current_min = np.percentile(lum, 1)
-    current_max = np.percentile(lum, 99)
-    denom = (current_max - current_min) if (current_max > current_min) else 1e-5
-    range_ratio = (max_brightness - min_brightness) / denom
+    merged_lab = cv2.merge((l_channel, a_channel, b_channel))
+    out_img = cv2.cvtColor(merged_lab, cv2.COLOR_LAB2RGB).astype(np.float32)
 
+    # (2) Now do a mini range alignment in RGB or Lab. 
+    #     For consistency, let's do it in Lab again, or do it channel-by-channel in RGB.
+
+    # Example: do old style in RGB (channel-by-channel):
     for c in range(3):
-        channel_data = float_img[:, :, c]
-        channel_data[opaque_mask] = ((channel_data[opaque_mask] - current_min) 
-                                     * range_ratio + min_brightness)
+        channel_data = out_img[..., c][opaque_mask]
+        c_min = np.percentile(channel_data, 1)
+        c_max = np.percentile(channel_data, 99)
+        denom = (c_max - c_min) if (c_max > c_min) else 1e-5
+        range_ratio = (max_brightness - min_brightness) / denom
 
-    out_img = np.clip(float_img, 0, 255).astype(np.uint8)
+        scaled = (channel_data - c_min) * range_ratio + min_brightness
+        out_img[..., c][opaque_mask] = np.clip(scaled, 0, 255)
+
+    out_img = np.clip(out_img, 0, 255).astype(np.uint8)
     return out_img
 
 
-def adjust_brightness_and_range_lab(rgb_image_uint8, opaque_mask, brightness, 
+def adjust_brightness_and_range_lab(rgb_image_uint8, opaque_mask, user_brightness, 
                                     min_brightness, max_brightness):
-    """
-    Adjust brightness & range in LAB color space for more perceptual uniformity.
-    If chalks_colors==True => skip user brightness, do minimal auto.
-    """
-    global chalks_colors
 
-    if chalks_colors:
-        # Use auto brightness in LAB, skip the user brightness variable
-        return auto_brightness_lab(rgb_image_uint8, opaque_mask)
-
-    # -------------- (Original Logic) --------------
+    # --- (1) Convert to Lab ---
     lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab_image)
 
-    # 1) User brightness adjustment
-    if abs(brightness - 0.5) > 1e-5:
-        brightness_adjustment = (brightness - 0.5) * 100.0
-        l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + brightness_adjustment, 0, 255)
+    # --- (2) User brightness shift ---
+    shift_val = (user_brightness - 0.5) * 100.0
+    l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + shift_val, 0, 255)
 
-    # 2) Range Alignment (for L)
-    l_min = np.percentile(l_channel[opaque_mask], 1)
-    l_max = np.percentile(l_channel[opaque_mask], 99)
-    denom = (l_max - l_min) if (l_max > l_min) else 1e-5
-    scale = (max_brightness - min_brightness) / denom
-    l_channel[opaque_mask] = (l_channel[opaque_mask] - l_min) * scale + min_brightness
+    # --- (3) Range alignment (the missing piece) ---
+    #    We re-scale the final L channel so that [1%ile ... 99%ile] 
+    #    becomes [min_brightness ... max_brightness].
+    #    This keeps the final image from going super-white or black.
+    l_opaque = l_channel[opaque_mask]
+    current_min = np.percentile(l_opaque, 1)
+    current_max = np.percentile(l_opaque, 99)
+    denom = (current_max - current_min) if (current_max > current_min) else 1e-5
+    range_ratio = (max_brightness - min_brightness) / denom
 
-    l_channel = np.clip(l_channel, 0, 255).astype(np.uint8)
-    lab_image = cv2.merge((l_channel, a_channel, b_channel))
-    adjusted_rgb = cv2.cvtColor(lab_image, cv2.COLOR_LAB2RGB)
+    # Apply the scale
+    # We shift so that current_min -> min_brightness, and current_max -> max_brightness
+    l_scaled = (l_opaque - current_min) * range_ratio + min_brightness
+    l_channel[opaque_mask] = np.clip(l_scaled, 0, 255)
+
+    # --- (4) Convert back to RGB ---
+    merged_lab = cv2.merge((l_channel, a_channel, b_channel))
+    adjusted_rgb = cv2.cvtColor(merged_lab, cv2.COLOR_LAB2RGB)
+
     return adjusted_rgb
-
 
 ###############################################################################
 #           Dynamic Determination of Boost and Threshold (Existing)           #
@@ -517,18 +535,28 @@ def determine_dynamic_boost_and_threshold(color_key_array, rgb_image_uint8):
 def selective_color_boost_hsv(rgb_image_uint8, opaque_mask, color_key_array, dynamic_settings):
     """
     Boost saturation for pixels close to each target color in HSV space.
+    If chalks_colors==False, skip boosting for certain colors (#ffe7c5, #2a3844).
     """
+    global chalks_colors
+
     hsv_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2HSV)
     h = hsv_image[:, :, 0].astype(np.float32)
     s = hsv_image[:, :, 1].astype(np.float32)
+    v = hsv_image[:, :, 2].astype(np.float32)
 
     for color_key in color_key_array:
+        hex_code = color_key['hex'].lstrip('#').lower()
+        
+        # Skip boosting for #ffe7c5 or #2a3844 if chalks_colors==False
+        if not chalks_colors:
+            if hex_code in ('ffe7c5', '2a3844'):
+                continue
+
         color_num = color_key['number']
         boost = dynamic_settings[color_num]['boost']
         threshold = dynamic_settings[color_num]['threshold']
 
         # Convert the target color to HSV
-        hex_code = color_key['hex'].lstrip('#')
         color_rgb = tuple(int(hex_code[i:i + 2], 16) for i in (0, 2, 4))
         color_hsv = cv2.cvtColor(np.uint8([[color_rgb]]), cv2.COLOR_RGB2HSV)[0, 0]
         target_h = color_hsv[0]
@@ -544,6 +572,8 @@ def selective_color_boost_hsv(rgb_image_uint8, opaque_mask, color_key_array, dyn
         s = np.where(color_mask, np.minimum(s * boost, 255), s)
 
     hsv_image[:, :, 1] = s
+    hsv_image[:, :, 2] = v  # If you want to also adjust V, do so here
+
     boosted_rgb = cv2.cvtColor(hsv_image.astype(np.uint8), cv2.COLOR_HSV2RGB)
     return boosted_rgb
 
@@ -573,28 +603,26 @@ def preprocess_image(
     - image:           NumPy array (H, W, C) in RGBA or RGB format.
     - color_key_array: List of dicts with color info to boost (includes 'number', 'hex').
     - callback:        Optional callable for progress/feedback.
-    - steps:           Optional dict of booleans to toggle steps on/off.
+    - gif:             Whether the input is multi-frame (e.g. GIF).
+                       If True, skip certain time-consuming or frame-incompatible steps.
 
     Returns:
         preprocessed_image (np.ndarray).
     """
     steps = None
-    # Global variables (as mentioned in your code)
     global use_lab, chalks_colors, brightness
 
     #--------------------------------------------------------------------------
     # 1. Separate default steps for chalks_colors = True vs. chalks_colors = False
     #--------------------------------------------------------------------------
     chalk_defaults = {
-        # Because chalks_colors == True => minimal transformations
-        # and skip brightness/gamma/unsharp by default
         'alpha_channel_separation': True,
         'contrast_stretch': True,
         'brightness_range_adjustment': False, 
         'gamma_correction': False,  
         'unsharp_mask': True,           
-        'flat_patch_restoration': False if gif else True,
-        'clahe': True,
+        'flat_patch_restoration': False if gif else False, 
+        'clahe': False,
         'dynamic_boost_and_threshold': True,
         'color_boost': True,
         'restore_non_opaque': False,
@@ -602,13 +630,12 @@ def preprocess_image(
     }
 
     normal_defaults = {
-        # Original approach for 6-color scenario
         'alpha_channel_separation': True,
         'contrast_stretch': True,
         'brightness_range_adjustment': True,
         'gamma_correction': True,
         'unsharp_mask': True,
-        'flat_patch_restoration': False if gif else True,  
+        'flat_patch_restoration': False if gif else False, 
         'clahe': True,
         'dynamic_boost_and_threshold': True,
         'color_boost': True,
@@ -620,7 +647,7 @@ def preprocess_image(
     default_steps = chalk_defaults if chalks_colors else normal_defaults
 
     #--------------------------------------------------------------------------
-    # 2. Merge any user-provided `steps` override 
+    # 2. Merge any user-provided `steps` override (if we had a steps dict)
     #--------------------------------------------------------------------------
     if steps is not None:
         for step_name, step_value in steps.items():
@@ -637,18 +664,17 @@ def preprocess_image(
             'clahe_clip_limit': 1.0,
             'clahe_grid_size': 8,
             'unsharp_strength': 1.2, 
-            'unsharp_radius': 1.0,
+            'unsharp_radius': 2.0,
             'gamma_correction': 1.0,  
-            'contrast_percentiles': (0.2, 99.8),  # gentler contrast
+            'contrast_percentiles': (0.2, 99.8), 
         }
     else:
-        # Original approach for 6-color scenario
         params = {
             'alpha_threshold': 191,
             'clahe_clip_limit': 4.0,
             'clahe_grid_size': 8,
             'unsharp_strength': 1.5,
-            'unsharp_radius': 1.0,
+            'unsharp_radius': 2,
             'gamma_correction': 0.9,
             'contrast_percentiles': (1, 99),
         }
@@ -672,10 +698,9 @@ def preprocess_image(
         )
         rgb_image_uint8 = rgb_image.astype(np.uint8).copy()
     else:
-        # If for some reason we skip alpha separation, we just assume full opaque
         has_alpha = False
         alpha_channel = None
-        rgb_image_uint8 = image[..., :3].astype(np.uint8).copy()  # assume last channel is alpha if 4-ch
+        rgb_image_uint8 = image[..., :3].astype(np.uint8).copy()
         opaque_mask = np.ones(rgb_image_uint8.shape[:2], dtype=bool)
 
     #--------------------------------------------------------------------------
@@ -691,27 +716,38 @@ def preprocess_image(
         )
 
     #--------------------------------------------------------------------------
-    # 7. Brightness & Range Adjustment (skip if chalks_colors = True)
+    # 7. Brightness & Range Adjustment
     #--------------------------------------------------------------------------
     if default_steps['brightness_range_adjustment']:
         if callback:
-            callback("Step 4: Adjusting brightness and color range...")
-        if use_lab:
-            rgb_image_uint8 = adjust_brightness_and_range_lab(
-                rgb_image_uint8,
-                opaque_mask,
-                brightness,
-                min_brightness,
-                max_brightness
-            )
+            callback("Step 4: Adjusting brightness (in Lab) to respect user brightness...")
+
+        # If chalks_colors == True and brightness is close to 0.5, we can auto
+        # Else use the user brightness
+        if chalks_colors and abs(brightness - 0.5) < 1e-5:
+            # Automatic brightness
+            if use_lab:
+                rgb_image_uint8 = auto_brightness_lab(rgb_image_uint8, opaque_mask)
+            else:
+                rgb_image_uint8 = auto_brightness_rgb(rgb_image_uint8, opaque_mask)
         else:
-            rgb_image_uint8 = adjust_brightness_and_range_rgb(
-                rgb_image_uint8,
-                opaque_mask,
-                brightness,
-                min_brightness,
-                max_brightness
-            )
+            # Manual brightness shift
+            if use_lab:
+                rgb_image_uint8 = adjust_brightness_and_range_lab(
+                    rgb_image_uint8,
+                    opaque_mask,
+                    brightness,
+                    min_brightness,
+                    max_brightness
+                )
+            else:
+                rgb_image_uint8 = adjust_brightness_and_range_rgb(
+                    rgb_image_uint8,
+                    opaque_mask,
+                    brightness,
+                    min_brightness,
+                    max_brightness
+                )
 
     #--------------------------------------------------------------------------
     # 8. Gamma Correction
@@ -725,46 +761,24 @@ def preprocess_image(
         )
 
     #--------------------------------------------------------------------------
-    # 9. Unsharp Mask
-    #--------------------------------------------------------------------------
-    if default_steps['unsharp_mask']:
-        if callback:
-            callback("Step 6: Applying unsharp masking...")
-        rgb_image_uint8 = apply_unsharp_mask(
-            rgb_image_uint8,
-            params['unsharp_strength'],
-            params['unsharp_radius']
-        )
-
-        # Optionally restore flat areas (only if unsharp ran)
-        if default_steps['flat_patch_restoration'] and params['unsharp_strength'] > 0.0:
-            if callback:
-                callback("Step 6b: Restoring flat areas to preserve uniform patches...")
-            rgb_image_uint8 = restore_flat_patches(
-                rgb_image_uint8, 
-                patch_size=3, 
-                std_threshold=3.0
-            )
-
-    #--------------------------------------------------------------------------
-    # 10. CLAHE
+    # 9. CLAHE
     #--------------------------------------------------------------------------
     if default_steps['clahe']:
         if callback:
-            callback("Step 7: Applying CLAHE (Contrast Limited Adaptive Histogram Equalization)...")
+            callback("Step 6: Applying CLAHE...")
         rgb_image_uint8 = apply_clahe(
             rgb_image_uint8,
-            params['clahe_clip_limit'],
-            params['clahe_grid_size'],
-            use_lab
+            clahe_clip_limit=params['clahe_clip_limit'],
+            clahe_grid_size=params['clahe_grid_size'],
+            gamma=params['gamma_correction']
         )
 
     #--------------------------------------------------------------------------
-    # 11. Dynamic Determination of Boost/Threshold + Selective Color Boost
+    # 10. Dynamic Determination of Boost/Threshold + Selective Color Boost
     #--------------------------------------------------------------------------
     if default_steps['dynamic_boost_and_threshold'] or default_steps['color_boost']:
         if callback:
-            callback("Step 8: Determining dynamic boost & threshold + selective color boost...")
+            callback("Step 7: Determining dynamic boost & threshold + selective color boost...")
         dynamic_settings = determine_dynamic_boost_and_threshold(
             color_key_array, 
             rgb_image_uint8
@@ -787,6 +801,22 @@ def preprocess_image(
                 )
 
     #--------------------------------------------------------------------------
+    # 11. Unsharp Mask
+    #--------------------------------------------------------------------------
+    if default_steps['unsharp_mask'] and params['unsharp_strength'] > 0:
+        if callback:
+            callback("Step 8: Applying unsharp masking...")
+        # Convert to BGR for unsharp, then convert back
+        bgr_for_unsharp = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2BGR)
+        bgr_sharpened = apply_unsharp_mask(
+            bgr_for_unsharp,
+            unsharp_strength=params['unsharp_strength'],
+            unsharp_radius=params['unsharp_radius'],
+            edge_threshold=5
+        )
+        rgb_image_uint8 = cv2.cvtColor(bgr_sharpened, cv2.COLOR_BGR2RGB)
+
+    #--------------------------------------------------------------------------
     # 12. Restore Non-Opaque Pixels
     #--------------------------------------------------------------------------
     if default_steps['restore_non_opaque']:
@@ -799,16 +829,12 @@ def preprocess_image(
     #--------------------------------------------------------------------------
     if default_steps['recombine_alpha'] and has_alpha:
         if callback:
-            callback("Step 10: Recombining alpha channel (if present) and finalizing image.")
+            callback("Step 10: Recombining alpha channel (if present).")
         preprocessed_image = np.dstack((rgb_image_uint8, alpha_channel))
     else:
         preprocessed_image = rgb_image_uint8
 
     return preprocessed_image
-
-
-
-
 
 
 
@@ -963,7 +989,7 @@ def simple_k_means_palette_mapping(img, color_key, params):
 
 @register_processing_method(
     'Hybrid Dither',
-    default_params={'strength': 1.0},
+    default_params={'strength': 0.75},
     description="Switches between Atkinson and Floyd dithering based on texture."
 )
 def hybrid_dithering(img, color_key, params):
@@ -1067,7 +1093,7 @@ def hybrid_dithering(img, color_key, params):
 
 @register_processing_method(
     'Pattern Dither',
-    default_params={'strength': 0.20},
+    default_params={'strength': 0.33},
     description="Uses an 8x8 Bayer matrix to apply dithering in a pattern. Pretty :3"
 )
 def ordered_dithering(img, color_key, params):
@@ -2125,7 +2151,7 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
     """
     try:
 
-        output_folder = exe_path_fs("game_data/Frames")
+        output_folder = exe_path_fs("game_data/frames")
         os.makedirs(output_folder, exist_ok=True)
 
         # Delete the contents of the 'Frames' folder before starting
@@ -2781,11 +2807,9 @@ class MainWindow(QMainWindow):
         self.connected = False
         self.window_titles = [
             "are you kidding me?",
-            "wOrks on My machine",
-            "the hunt for purple chalk",
+            "purple chalk???",
             "video game lover",
             "Color?? i hardly know 'er",
-            "yiff poster 9000",
             "Pupple Puppyy wuz here",
             "u,mm, Haiiii X3",
             "animal",
@@ -2807,10 +2831,10 @@ class MainWindow(QMainWindow):
             "This is a bucket",
             "bork meooow",
             "The roots are growing",
-            "\"A mere setback.\" -grandma ",
             "\"shrivel\" -grandma ",
             "Gnarp gnap",
-            "im tired"
+            "im tired",
+            "all roads lead deeper into the woods"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
@@ -2851,7 +2875,7 @@ class MainWindow(QMainWindow):
                     stop:0 #7b1fa2, stop:1 #9c27b0);
                 color: white;
                 border-radius: 15px;  /* Rounded corners */
-                font-family: 'Comic Sans MS', sans-serif;
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-size: 20px;
                 font-weight: bold;
                 padding: 15px 30px;
@@ -2983,7 +3007,7 @@ class MainWindow(QMainWindow):
             QMainWindow {
                 background-color: #1e1a33; /* Very dark purple */
                 color: #ffffff;
-                font-family: 'Comic Sans MS', sans-serif; /* Use Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
                 font-size: 16px; /* Slightly larger */
             }
@@ -2994,7 +3018,7 @@ class MainWindow(QMainWindow):
                 padding: 10px;
                 border-radius: 5px;
                 font-size: 16px; /* Slightly larger */
-                font-family: 'Comic Sans MS', sans-serif; /* Ensure Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
             }
             QPushButton:hover {
@@ -3006,13 +3030,13 @@ class MainWindow(QMainWindow):
             QLabel {
                 font-size: 16px; /* Slightly larger */
                 color: #ffffff;
-                font-family: 'Comic Sans MS', sans-serif; /* Ensure Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
             }
             QCheckBox {
                 font-size: 16px; /* Slightly larger */
                 color: #ffffff;
-                font-family: 'Comic Sans MS', sans-serif; /* Ensure Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
             }
             QSlider::groove:horizontal {
@@ -3034,7 +3058,7 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
                 background-color: #424242;
                 color: #ffffff;
-                font-family: 'Comic Sans MS', sans-serif; /* Ensure Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
             }
             QProgressBar {
@@ -3043,7 +3067,7 @@ class MainWindow(QMainWindow):
                 border-radius: 7px;
                 text-align: center;
                 background-color: #424242;
-                font-family: 'Comic Sans MS', sans-serif; /* Ensure Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
                 font-size: 16px; /* Slightly larger */
             }
@@ -3056,7 +3080,7 @@ class MainWindow(QMainWindow):
                 border-radius: 5px;
                 margin-top: 10px;
                 color: #ffffff;
-                font-family: 'Comic Sans MS', sans-serif; /* Ensure Comic Sans */
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-weight: bold; /* Bold text */
                 font-size: 16px; /* Slightly larger */
             }
@@ -3191,7 +3215,7 @@ class MainWindow(QMainWindow):
                     stop:0 #7b1fa2, stop:1 #9c27b0);
                 color: white;
                 border-radius: 15px;  /* Rounded corners */
-                font-family: 'Comic Sans MS', sans-serif;
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-size: 20px;
                 font-weight: bold;
                 padding: 15px 30px;
@@ -3270,7 +3294,7 @@ class MainWindow(QMainWindow):
         self.signature_label.setStyleSheet("""
             color: #A45EE5;
             font-size: 16px;
-            font-family: "Comic Sans MS", cursive, sans-serif;
+            font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
             font-weight: bold;
         """)
         self.signature_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
@@ -4760,7 +4784,7 @@ class MainWindow(QMainWindow):
                     background-color: #7b1fa2;
                     color: white;
                     border-radius: 5px;
-                    font-family: 'Comic Sans MS', sans-serif;
+                    font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                     font-size: 16px;
                     font-weight: bold;
                     padding: 5px;
@@ -4805,7 +4829,7 @@ class MainWindow(QMainWindow):
                     color: white;
                     font-size: 16px; 
                     font-weight: bold;
-                    font-family: "Comic Sans MS", sans-serif;
+                    font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                     border-radius: 8px;
                     padding: 8px;
                 }
@@ -4860,7 +4884,7 @@ class MainWindow(QMainWindow):
 
             self.brightness_slider = QSlider(Qt.Horizontal)
             self.brightness_slider.setRange(-53, 153)
-            self.brightness_slider.setValue(86)
+            self.brightness_slider.setValue(76)
             self.brightness_slider.setTickInterval(1)
             brightness_layout.addWidget(self.brightness_slider, alignment=Qt.AlignTop)
 
@@ -4895,7 +4919,7 @@ class MainWindow(QMainWindow):
                         stop:0 #7b1fa2, stop:1 #9c27b0);
                     color: white;
                     border-radius: 15px;
-                    font-family: 'Comic Sans MS', sans-serif;
+                    font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                     font-size: 24px;
                     font-weight: bold;
                     padding: 15px 30px;
@@ -5015,7 +5039,7 @@ class MainWindow(QMainWindow):
                     stop:0 #7b1fa2, stop:1 #9c27b0);
                 color: white;
                 border-radius: 15px;  /* Rounded corners */
-                font-family: 'Comic Sans MS', sans-serif;
+                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
                 font-size: 30px;  /* Corrected font size syntax */
                 font-weight: bold;
                 padding: 15px 30px;
@@ -5555,13 +5579,13 @@ class MainWindow(QMainWindow):
     def resize_slider_changed(self, value):
         self.resize_value_label.setText(str(value))
         if not self.manual_change and not self.is_gif:
-            if value > 199:
+            if value > 200:
                 if "Hybrid Dither" in [method["name"] for method in self.processing_methods]:
                     self.processing_combobox.blockSignals(True)  # Block signals
                     self.processing_combobox.setCurrentText("Hybrid Dither")
                     self.processing_combobox.blockSignals(False)  # Unblock signals
                     self.processing_method_changed("Hybrid Dither", strength=False, manual=False)
-            elif value > 50:
+            elif value > 64:
                 if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
                     self.processing_combobox.blockSignals(True)
                     self.processing_combobox.setCurrentText("Pattern Dither")
@@ -6157,8 +6181,12 @@ class MainWindow(QMainWindow):
         self.lab_color_checkbox.setChecked(True)
         self.oncanvascheckbox.setChecked(False)
         self.ongrasscheckbox.setChecked(False)
-        self.brightness_label.setVisible(True)
-        self.brightness_slider.setVisible(True)
+        if not self.bg_removal_checkbox.isChecked():
+            self.brightness_label.setVisible(True)
+            self.brightness_slider.setVisible(True)
+        else:
+            self.brightness_label.setVisible(False)
+            self.brightness_slider.setVisible(False)
 
         for color_number in self.boost_labels:
                 self.boost_labels[color_number].setVisible(False)
@@ -6166,7 +6194,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
 
-        self.brightness_slider.setValue(86)
+        self.brightness_slider.setValue(76)
         self.manual_change = False
         self.resize_slider_changed(self.resize_slider.value())
 
@@ -6181,7 +6209,7 @@ class MainWindow(QMainWindow):
                     self.threshold_sliders[color_number].setValue(20)
 
                 
-                self.brightness_slider.setValue(86)
+                self.brightness_slider.setValue(76)
 
 
             else:
@@ -6194,7 +6222,7 @@ class MainWindow(QMainWindow):
                 if color_number in self.threshold_sliders:
                     self.threshold_sliders[color_number].setValue(28)
                 
-                self.brightness_slider.setValue(16)
+                self.brightness_slider.setValue(30)
 
 
 
@@ -6327,27 +6355,58 @@ class MainWindow(QMainWindow):
 
 
             else:
-                # Handle static content
-                self.is_gif = False
-                img = img.convert("RGBA")  # Ensure consistent format
-
-                # Get the width and height of the image using PIL
-                image_width, image_height = img.size
-                max_dimension = max(image_width, image_height)  # Use the larger dimension
-
-                # Adjust the resize slider based on the maximum dimension
-                if max_dimension > 200:
-                    self.resize_slider.setMaximum(200)
+                img = img.convert("RGBA")  # Ensure RGBA, if needed
+                width, height = img.size
+                largest_dim = max(width, height)
+                smallest_dim = min(width, height)
+                
+                # -- 1) Check special cases ------------------------------------------
+                
+                # If it's a square
+                if width == height:
+                    max_dim = 200
+                    
+                # If one dimension is exactly twice the other
+                elif (width == 2 * height) or (height == 2 * width):
+                    max_dim = 400
+                    
+                else:
+                    # -- 2) Otherwise, do bounding-box logic for 400x200 vs 200x400 --
+                    
+                    # Scale factor for fitting into 400 wide x 200 tall
+                    # (if the image is larger, we scale down; if smaller, you can decide
+                    #  whether you want to allow scaling up or clamp to 1.0)
+                    scale_factor_a = min(400 / width, 200 / height)
+                    
+                    # Scale factor for fitting into 200 wide x 400 tall
+                    scale_factor_b = min(200 / width, 400 / height)
+                    
+                    # Pick whichever orientation yields a bigger scaled dimension
+                    best_scale_factor = max(scale_factor_a, scale_factor_b)
+                    
+                    scaled_max_dimension = best_scale_factor * largest_dim
+                    
+                    # Convert to integer (round or floor, as you prefer)
+                    max_dim = int(round(scaled_max_dimension))
+                    
+                    # The absolute max allowed is 400
+                    if max_dim > 400:
+                        max_dim = 400
+                
+                # -- 3) Set slider maximum up to 400 ----------------------------------
+                self.resize_slider.setMaximum(max_dim)  # max_dim is already ≤ 400
+                
+                # -- 4) Decide what the slider "current value" should be -------------
+                if largest_dim > max_dim:
                     self.resize_slider.setValue(128)
                 else:
-                    self.resize_slider.setMaximum(200)
-                    self.resize_slider.setValue(max_dimension)
-                    self.resize_slider_changed(max_dimension)
+                    self.resize_slider.setValue(largest_dim)
+                
+                # If you have a method to apply the slider change:
+                self.resize_slider_changed(self.resize_slider.value())
 
-                self.image = ImageQt.ImageQt(img)  # Convert PIL image to QImage
+                self.image = ImageQt.ImageQt(img)
                 self.display_image()
-            
-
             
             for color_number in self.color_checkboxes.keys():
                 # Enable all colors
@@ -6355,19 +6414,19 @@ class MainWindow(QMainWindow):
 
                 # Disable RGB and Blank checkboxes
                 self.rgb_checkboxes[color_number].setChecked(False)
-                self.rgb_checkboxes[color_number].setVisible(True)  # Ensure visibility
+                self.rgb_checkboxes[color_number].setVisible(True)
                 self.blank_checkboxes[color_number].setChecked(False)
-                self.blank_checkboxes[color_number].setVisible(True)  # Ensure visibility
+                self.blank_checkboxes[color_number].setVisible(True)  
 
                 # Reset Boost sliders to 1.2 (value 12)
                 if color_number in self.boost_sliders:
                     self.boost_sliders[color_number].setValue(14)
-                    self.boost_sliders[color_number].setVisible(True)  # Reset visibility
+                    self.boost_sliders[color_number].setVisible(True)
 
                 # Reset Threshold sliders to 20
                 if color_number in self.threshold_sliders:
                     self.threshold_sliders[color_number].setValue(20)
-                    self.threshold_sliders[color_number].setVisible(True)  # Reset visibility
+                    self.threshold_sliders[color_number].setVisible(True) 
 
                 # Hide Boost and Threshold labels
                 if color_number in self.boost_labels:
@@ -6402,7 +6461,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
 
-            self.brightness_slider.setValue(86)
+            self.brightness_slider.setValue(76)
 
             self.manual_change = False
             self.resize_slider_changed(self.resize_slider.value())
@@ -7600,7 +7659,7 @@ def create_default_config():
     default_config_data = {
         "open_menu": 16777247, 
         "spawn_stamp": 61, 
-        "ctrl_z": 16777220, 
+        "ctrl_z": 90, 
         "toggle_playback": 45, 
         "gif_ready": True, 
         "chalks": False,

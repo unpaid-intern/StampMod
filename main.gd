@@ -35,7 +35,7 @@ var config_data = {}
 var default_config_data = {
 	"open_menu": 16777247, 
 	"spawn_stamp": 61, 
-	"ctrl_z": 16777220, 
+	"ctrl_z": 90, 
 	"toggle_playback": 45, 
 	"gif_ready": true, 
 	"chalks": false,
@@ -442,8 +442,11 @@ func _gif():
 	emit_signal("_play")
 
 func _ctrlz():
-	emit_signal("_delete")
-	
+	if config_data["ctrl_z"] == 90:
+		if Input.is_key_pressed(KEY_CONTROL):
+			emit_signal("_delete")
+	else:
+		emit_signal("_delete")
 
 
 func send_keybind():

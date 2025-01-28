@@ -35,7 +35,7 @@ var frame_delays = []
 var imgx = null
 var imgy = null
 var last_mouse = null
-var four = false
+var two = false
 var dir = null
 var gifdir = null
 var origin = null
@@ -58,7 +58,7 @@ enum BrushMode{
 	PENCIL, 
 	ERASER, 
 }
-
+var vertical = false
 var brush_mode = BrushMode.PENCIL
 var brush_size = 1
 var brush_color = 0
@@ -78,7 +78,7 @@ var debug = false
 func _ready():
 	if debug:
 		img_path = "res://mods/PurplePuppy-Stamps/game_data/current_stamp_data/stamp.txt"
-		gui_path = "D:/Trash/GDWeave/mods/PurplePuppy-Stamps/imagePawcessor/launcher.exe"
+		gui_path = "D:/Trash/GDWeave/mods/PurplePuppy-Stamps/imagePawcessor/imagePawcess.py"
 		frames_path = "res://mods/PurplePuppy-Stamps/game_data/current_stamp_data/frames.txt"
 	else:
 		img_path = key_handler.img_path
@@ -108,6 +108,7 @@ func _chalk_update(pos):
 
 
 func _delete(gif = false):
+	pass
 	if not update_dynamic_nodes():
 		return 
 	if _hud.using_chat and _hud:
@@ -120,7 +121,7 @@ func _delete(gif = false):
 		isgif = false
 	var delete = []
 	var normal = true
-	if key_handler.stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
+	if key_handler.stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
 		ctrlz()
 		return
 	for i in range(3):
@@ -262,51 +263,68 @@ func _spawn_canvas(pos, file_path, _offset = 10):
 	else:
 		grid = 0
 	
-	if grid == 0 && key_handler.stupidincompatabilitydontchangeshitthatbreaksotherpeoplesmods:
+	if grid == 0 && key_handler.stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
 			PlayerData._send_notification("feature incompatable with \"thetamborine\" mod", 1)
 			PlayerData._send_notification("please uninstall it if you wish to place off-canvas", 1)
 			return false
 		
 	var offsets = []
-	if four and grid == 0:
+	if two and grid == 0:
 		shoulddel = true
-		match dir:
-			"down":
-				offsets = [
-					Vector3(_offset, 0, - _offset), 
-					Vector3( - _offset, 0, - _offset), 
-					Vector3( - _offset, 0, _offset), 
-					Vector3(_offset, 0, _offset)
-				]
-			"up":
-				offsets = [
-					Vector3( - _offset, 0, _offset), 
-					Vector3(_offset, 0, _offset), 
-					Vector3(_offset, 0, - _offset), 
-					Vector3( - _offset, 0, - _offset)
-				]
-			"right":
-				offsets = [
-					Vector3( - _offset, 0, - _offset), 
-					Vector3( - _offset, 0, _offset), 
-					Vector3(_offset, 0, _offset), 
-					Vector3(_offset, 0, - _offset)
-				]
-			"left":
-				offsets = [
-					Vector3(_offset, 0, _offset), 
-					Vector3(_offset, 0, - _offset), 
-					Vector3( - _offset, 0, - _offset), 
-					Vector3( - _offset, 0, _offset)
-				]
-		
+		print(dir)
+		vertical = false
+		if imgy > imgx:
+			vertical = true
+		if vertical:
+			match dir:
+				"down":
+					offsets = [
+						Vector3(0 , 0, _offset), 
+						Vector3(0 , 0, - _offset),
+					]
+				"up":
+					offsets = [
+						Vector3(0 , 0, - _offset), 
+						Vector3(0 , 0, _offset), 
+					]
+				"right":
+					offsets = [
+						Vector3(- _offset, 0, 0), 
+						Vector3(_offset, 0, 0), 
+					]
+				"left":
+					offsets = [
+						Vector3(_offset, 0, 0), 
+						Vector3( - _offset, 0, 0), 
+					]
+		else: 
+			match dir:
+				"down":
+					offsets = [
+						Vector3(_offset, 0, 0), 
+						Vector3( - _offset, 0, 0), 
+					]
+				"up":
+					offsets = [
+						Vector3( - _offset, 0, 0), 
+						Vector3(_offset, 0, 0), 
+					]
+				"right":
+					offsets = [
+						Vector3(0 , 0, - _offset), 
+						Vector3(0 , 0, _offset), 
+					]
+				"left":
+					offsets = [
+						Vector3(0 , 0, _offset), 
+						Vector3(0 , 0, - _offset), 
+					]		
 		for offset in offsets:
 			var canvas_pos = pos + offset
 			canvas_pos.y -= 0.008699999999999999
 			var new_canvas_id = _Network._sync_create_actor("canvas", canvas_pos, current_zone)
 			_canvas_id.append(new_canvas_id)
 			print("Created new canvas at ", canvas_pos)
-			yield (get_tree().create_timer(1.0/12.0), "timeout")
 			var chalknode = _actor_man._get_actor_by_id(new_canvas_id)
 			if chalknode:
 				var smutnode = chalknode.get_node("chalk_canvas")
@@ -315,7 +333,7 @@ func _spawn_canvas(pos, file_path, _offset = 10):
 			else:
 				print("Failed to retrieve chalknode for canvas at ", canvas_pos)
 	else:
-		four = false
+		two = false
 		var canvas_pos = Vector3.ZERO + pos
 		if grid == 0:
 			shoulddel = true
@@ -462,7 +480,7 @@ func check_image_resolution(file_path, pos):
 					PlayerData._send_notification("Spawning at dock!", 0)
 					if imgx <= 20 and imgy <= 20:
 						origin = pos
-						four = false
+						two = false
 						_spawn_canvas(origin, file_path)
 						
 							
@@ -477,7 +495,7 @@ func check_image_resolution(file_path, pos):
 							_offset = 10
 						if new_canvas:
 							origin = pos
-							four = true
+							two = true
 							_spawn_canvas(origin, file_path, _offset)
 							
 								
@@ -508,7 +526,7 @@ func check_image_resolution(file_path, pos):
 			gifdir = dir
 			if imgx <= 20 and imgy <= 20:
 				origin = pos
-				four = false
+				two = false
 				_spawn_canvas(origin, file_path)
 			else:
 				var _offset = null
@@ -520,7 +538,7 @@ func check_image_resolution(file_path, pos):
 					_offset = 10
 				if new_canvas:
 					origin = pos
-					four = true
+					two = true
 					_spawn_canvas(origin, file_path, _offset)
 		else:
 			_delete(true)
@@ -528,7 +546,7 @@ func check_image_resolution(file_path, pos):
 			gifdir = dir
 			if imgx <= 20 and imgy <= 20:
 				origin = pos
-				four = false
+				two = false
 				_spawn_canvas(origin, file_path)
 				
 					
@@ -542,7 +560,7 @@ func check_image_resolution(file_path, pos):
 					_offset = 10
 				if new_canvas:
 					origin = pos
-					four = true
+					two = true
 					_spawn_canvas(origin, file_path, _offset)
 					
 						
@@ -617,7 +635,6 @@ func display_image(file_path, pos):
 	base = base_offset + Vector3(0.01234, 0, 0.01234)
 	_chalk_send()
 	if isgif:
-		print("IM A GIF")
 		match orientation:
 			"up": base_offset = Vector3(0.5 * imgx, 0, 0.5 * imgy)
 			"right": base_offset = Vector3( - 0.5 * imgy, 0, 0.5 * imgx)
@@ -689,18 +706,12 @@ func toggle_playback_mode(_message = false):
 	var mode_names = ["Normal", "Half", "SLOW", "Manual"]
 	if _message:
 		PlayerData._send_notification("GIF mode changed to: " + mode_names[playback_mode], 0)
-	
-	# If switching FROM normal/half/slow INTO manual:
-	#   1) Pause if currently playing
-	#   2) Sync manual_frame_index to the last frame we showed in _current_frame_index
+
 	if prior in [PlaybackMode.NORMAL, PlaybackMode.HALF, PlaybackMode.SLOW] and playback_mode == PlaybackMode.MANUAL:
 		if _playing:
 			_playing = false
 		manual_frame_index = _current_frame_index
-	
-	# If switching FROM manual INTO normal/half/slow:
-	#   1) Sync _current_frame_index to manual_frame_index
-	#   2) Do NOT auto-play or reset. The user must press "Play" again if they want to resume.
+
 	if prior == PlaybackMode.MANUAL and playback_mode in [PlaybackMode.NORMAL, PlaybackMode.HALF, PlaybackMode.SLOW]:
 		_current_frame_index = manual_frame_index
 
@@ -819,50 +830,58 @@ func _play_frame(frame_index):
 
 
 func _chalk_draw(pos, color):
-	if four:
-		match dir:
-			"up":
-				if pos.x >= origin.x and pos.z <= origin.z:
-					_map_and_draw(2, pos, color, send_load_3)
-				elif pos.x < origin.x and pos.z <= origin.z:
-					_map_and_draw(3, pos, color, send_load_4)
-				elif pos.x < origin.x and pos.z > origin.z:
-					_map_and_draw(0, pos, color, send_load)
-				elif pos.x >= origin.x and pos.z > origin.z:
-					_map_and_draw(1, pos, color, send_load_2)
+	if two:
+		if vertical:
+			match dir:
+				"up":
+					if pos.z >= origin.z:
+						_map_and_draw(1, pos, color, send_load_2)
+					elif pos.z < origin.z:
+						_map_and_draw(0, pos, color, send_load)
+				"down":
+					if pos.z >= origin.z:
+						_map_and_draw(0, pos, color, send_load)
+					elif pos.z < origin.z:
+						_map_and_draw(1, pos, color, send_load_2)
 
-			"down":
-				if pos.x <= origin.x and pos.z >= origin.z:
-					_map_and_draw(2, pos, color, send_load_3)
-				elif pos.x > origin.x and pos.z >= origin.z:
-					_map_and_draw(3, pos, color, send_load_4)
-				elif pos.x > origin.x and pos.z < origin.z:
-					_map_and_draw(0, pos, color, send_load)
-				elif pos.x <= origin.x and pos.z < origin.z:
-					_map_and_draw(1, pos, color, send_load_2)
+				"left":
+					if pos.x >= origin.x:
+						_map_and_draw(0, pos, color, send_load)
+					elif pos.x < origin.x:
+						_map_and_draw(1, pos, color, send_load_2)
+				"right":
+					if pos.x <= origin.x:
+						_map_and_draw(1, pos, color, send_load_2)
+					elif pos.x > origin.x:
+						_map_and_draw(0, pos, color, send_load)
+				_:
+					pass
+		else: 
+			match dir:
+				"up":
+					if pos.x >= origin.x:
+						_map_and_draw(1, pos, color, send_load_2)
+					elif pos.x < origin.x:
+						_map_and_draw(0, pos, color, send_load)
+				"down":
+					if pos.x >= origin.x:
+						_map_and_draw(0, pos, color, send_load)
+					elif pos.x < origin.x:
+						_map_and_draw(1, pos, color, send_load_2)
 
-			"left":
-				if pos.z >= origin.z and pos.x <= origin.x:
-					_map_and_draw(3, pos, color, send_load_4)
-				elif pos.z >= origin.z and pos.x > origin.x:
-					_map_and_draw(0, pos, color, send_load)
-				elif pos.z < origin.z and pos.x > origin.x:
-					_map_and_draw(1, pos, color, send_load_2)
-				elif pos.z < origin.z and pos.x <= origin.x:
-					_map_and_draw(2, pos, color, send_load_3)
+				"left":
+					if pos.z >= origin.z:
+						_map_and_draw(0, pos, color, send_load)
+					elif pos.z < origin.z:
+						_map_and_draw(1, pos, color, send_load_2)
 
-			"right":
-				if pos.z >= origin.z and pos.x > origin.x:
-					_map_and_draw(2, pos, color, send_load_3)
-				elif pos.z >= origin.z and pos.x <= origin.x:
-					_map_and_draw(1, pos, color, send_load_2)
-				elif pos.z < origin.z and pos.x <= origin.x:
-					_map_and_draw(0, pos, color, send_load)
-				elif pos.z < origin.z and pos.x > origin.x:
-					_map_and_draw(3, pos, color, send_load_4)
-			_:
-				
-				pass
+				"right":
+					if pos.z >= origin.z:
+						_map_and_draw(1, pos, color, send_load_2)
+					elif pos.z < origin.z:
+						_map_and_draw(0, pos, color, send_load)
+				_:
+					pass
 	else:
 		_map_and_draw(0, pos, color, send_load)
 
@@ -911,20 +930,13 @@ func _map_and_draw(grid_idx, pos, color, load_array):
 
 func _chalk_send():
 	if grid == 0:
-		if four:
-			
+		if two:
 			if send_load.size() > 0:
 				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load.duplicate(), "canvas_id": _canvas_id[0]}, "all", 2, Network.CHANNELS.CHALK)
 				send_load.clear()
 			if send_load_2.size() > 0:
 				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load_2.duplicate(), "canvas_id": _canvas_id[1]}, "all", 2, Network.CHANNELS.CHALK)
 				send_load_2.clear()
-			if send_load_3.size() > 0:
-				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load_3.duplicate(), "canvas_id": _canvas_id[2]}, "all", 2, Network.CHANNELS.CHALK)
-				send_load_3.clear()
-			if send_load_4.size() > 0:
-				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load_4.duplicate(), "canvas_id": _canvas_id[3]}, "all", 2, Network.CHANNELS.CHALK)
-				send_load_4.clear()
 		else:
 			
 			if send_load.size() > 0:
