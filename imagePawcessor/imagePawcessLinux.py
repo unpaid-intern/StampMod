@@ -2,6 +2,7 @@ import os
 import io
 import sys
 import random
+import traceback
 import threading
 import tempfile
 import json
@@ -996,6 +997,7 @@ def process_image(img, color_key, process_mode, process_params):
         return color_matching(img, color_key, process_params)
 
 
+
 @register_processing_method(
     'Color Match',
     default_params={},
@@ -1075,109 +1077,17 @@ def simple_k_means_palette_mapping(img, color_key, params):
 
     return result_img
 
-@register_processing_method(
-    'Hybrid Dither',
-    default_params={'strength': 0.75},
-    description="Switches between Atkinson and Floyd dithering based on texture."
-)
-def hybrid_dithering(img, color_key, params):
-    global use_lab
 
-    strength = params.get('strength', 1.0)
-
-    gray_img = img.convert('L')
-    edges = gray_img.filter(ImageFilter.FIND_EDGES)
-    saliency_map = edges.filter(ImageFilter.GaussianBlur(1.5))
-    saliency_array = np.array(saliency_map, dtype=np.float32) / 255.0
-
-    has_alpha = (img.mode == 'RGBA')
-    img_array = np.array(img, dtype=np.uint8)
-    height, width = img_array.shape[:2]
-
-    if has_alpha:
-        alpha_channel = img_array[:, :, 3]
-    else:
-        alpha_channel = None
-
-    color_nums = list(color_key.keys())
-    color_values_rgb = np.array(list(color_key.values()), dtype=np.uint8)
-    if use_lab:
-        color_values_lab = rgb_palette_to_lab(color_key).astype(np.float32)
-    else:
-        color_values_lab = None
-
-    def closest_color_func(pixel_rgb):
-        if use_lab:
-            arr = np.uint8([[pixel_rgb]])
-            p_lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0,0].astype(np.float32)
-            diff = color_values_lab - p_lab
-            dist_sq = np.sum(diff*diff, axis=1)
-            idx = np.argmin(dist_sq)
-        else:
-            p_f = np.float32(pixel_rgb)
-            diff = color_values_rgb.astype(np.float32) - p_f
-            dist_sq = np.sum(diff*diff, axis=1)
-            idx = np.argmin(dist_sq)
-        return idx
-
-    atkinson_matrix = [
-        (1, 0, 1 / 8), (2, 0, 1 / 8),
-        (-1, 1, 1 / 8), (0, 1, 1 / 8), (1, 1, 1 / 8),
-        (0, 2, 1 / 8),
-    ]
-    floyd_steinberg_matrix = [
-        (1, 0, 7 / 16),
-        (-1, 1, 3 / 16), (0, 1, 5 / 16), (1, 1, 1 / 16),
-    ]
-
-    img_array = img_array.astype(np.int16)
-
-    if has_alpha:
-        alpha_mask = (alpha_channel > 0)
-    else:
-        alpha_mask = np.ones((height, width), dtype=bool)
-
-    for y in range(height):
-        for x in range(width):
-            if not alpha_mask[y, x]:
-                continue
-
-            old_pixel = img_array[y, x]
-            old_pixel_rgb = old_pixel[:3]
-
-            saliency = saliency_array[y, x]
-            diffusion_matrix = floyd_steinberg_matrix if saliency > 0.5 else atkinson_matrix
-
-            idx = closest_color_func(old_pixel_rgb)
-            new_pixel = color_values_rgb[idx]
-
-            quant_error = [(o - n) * strength for o, n in zip(old_pixel_rgb, new_pixel)]
-
-            if has_alpha:
-                img_array[y, x, :3] = new_pixel
-                img_array[y, x, 3] = old_pixel[3]
-            else:
-                img_array[y, x, :3] = new_pixel
-
-            for dx, dy, coeff in diffusion_matrix:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height and alpha_mask[ny, nx]:
-                    neighbor = img_array[ny, nx]
-                    nr = neighbor[0] + quant_error[0]*coeff
-                    ng = neighbor[1] + quant_error[1]*coeff
-                    nb = neighbor[2] + quant_error[2]*coeff
-                    img_array[ny, nx, 0] = int(min(max(nr, 0), 255))
-                    img_array[ny, nx, 1] = int(min(max(ng, 0), 255))
-                    img_array[ny, nx, 2] = int(min(max(nb, 0), 255))
-
-    img_array = np.clip(img_array, 0, 255).astype(np.uint8)
-
-    if has_alpha:
-        result_img = Image.fromarray(img_array, 'RGBA')
-    else:
-        result_img = Image.fromarray(img_array, 'RGB')
-
-    return result_img
+BAYER_8x8 = np.array([
+    [0,32,8,40,2,34,10,42],
+    [48,16,56,24,50,18,58,26],
+    [12,44,4,36,14,46,6,38],
+    [60,28,52,20,62,30,54,22],
+    [3,35,11,43,1,33,9,41],
+    [51,19,59,27,49,17,57,25],
+    [15,47,7,39,13,45,5,37],
+    [63,31,55,23,61,29,53,21]
+], dtype=np.float32) / 64.0
 
 @register_processing_method(
     'Pattern Dither',
@@ -1187,96 +1097,74 @@ def hybrid_dithering(img, color_key, params):
 def ordered_dithering(img, color_key, params):
     global use_lab
 
+    has_alpha = img.mode == "RGBA"
+
     strength = params.get('strength', 1.0)
-    bayer_8x8 = np.array([
-        [0,32,8,40,2,34,10,42],
-        [48,16,56,24,50,18,58,26],
-        [12,44,4,36,14,46,6,38],
-        [60,28,52,20,62,30,54,22],
-        [3,35,11,43,1,33,9,41],
-        [51,19,59,27,49,17,57,25],
-        [15,47,7,39,13,45,5,37],
-        [63,31,55,23,61,29,53,21]
-    ], dtype=np.float32) / 64.0
 
-    img = img.copy()
     img_array = np.array(img, dtype=np.uint8)
-    has_alpha = (img.mode == 'RGBA')
-    if has_alpha:
-        alpha_channel = img_array[:, :, 3]
-        alpha_mask = (alpha_channel > 0)
-    else:
-        alpha_mask = np.ones((img_array.shape[0], img_array.shape[1]), dtype=bool)
-
     height, width = img_array.shape[:2]
 
-    color_nums = list(color_key.keys())
-    color_values_rgb = np.array(list(color_key.values()), dtype=np.uint8)
-    if use_lab:
-        color_values_lab = rgb_palette_to_lab(color_key).astype(np.float32)
-    else:
-        color_values_lab = None
-
-    def closest_color_func(pixel_rgb):
+    # Convert the color key to an array
+    i = 0
+    col_key = []
+    diff_key = []
+    for i, value in enumerate(color_key.values()):
+        value = np.array(value, dtype = np.uint8)
         if use_lab:
-            arr = np.uint8([[pixel_rgb]])
-            p_lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0,0].astype(np.float32)
-            diff = color_values_lab - p_lab
-            dist_sq = np.sum(diff*diff, axis=1)
-            idx = np.argmin(dist_sq)
+            diff_key.append(rgb_to_lab(*value))
         else:
-            p_f = pixel_rgb.astype(np.float32)
-            diff = color_values_rgb.astype(np.float32) - p_f
-            dist_sq = np.sum(diff*diff, axis=1)
-            idx = np.argmin(dist_sq)
-        return idx
+            diff_key.append(value)
+        col_key.append(value)
+    color_key = np.array(col_key, dtype=np.uint8)
+    diff_key = np.array(diff_key, dtype=np.float64)
 
     adjustment_factor = 0.3 * strength
 
-    tiled_bayer = np.tile(bayer_8x8, (height//8+1, width//8+1))
+    tiled_bayer = np.tile(BAYER_8x8, (height//8+1, width//8+1))
     tiled_bayer = tiled_bayer[:height, :width]
 
-    img_array = img_array.astype(np.int16)
+    img_rgb = img_array[..., :3].astype(np.uint8)
 
-    for y in range(height):
-        for x in range(width):
-            if not alpha_mask[y, x]:
-                continue
-
-            old_pixel = img_array[y, x, :3].astype(np.uint8)
-
-            if use_lab:
-                p_lab = rgb_to_lab_single(old_pixel)
-                L = p_lab[0] / 255.0
-                if L < tiled_bayer[y, x]:
-                    L_adj = max(0, L - adjustment_factor)
-                else:
-                    L_adj = min(1.0, L + adjustment_factor)
-
-                p_lab_adj = (L_adj*255, p_lab[1], p_lab[2])
-                arr = np.uint8([[p_lab_adj]])
-                pixel_rgb_adj = cv2.cvtColor(arr, cv2.COLOR_LAB2RGB)[0,0]
-            else:
-                R, G, B = old_pixel
-                brightness = (R+G+B)/765.0
-                if brightness < tiled_bayer[y, x]:
-                    factor = 1 - adjustment_factor
-                else:
-                    factor = 1 + adjustment_factor
-                pixel_rgb_adj = np.clip([R*factor, G*factor, B*factor],0,255).astype(np.uint8)
-
-            idx = closest_color_func(pixel_rgb_adj)
-            new_pixel = color_values_rgb[idx]
-            img_array[y, x, :3] = new_pixel
-
-    img_array = np.clip(img_array, 0, 255).astype(np.uint8)
-    if has_alpha:
-        result_img = Image.fromarray(img_array, 'RGBA')
+    if use_lab:
+        p_lab = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB).astype(np.float64)
+        p_lab[..., 0] /= 255.0
+        less = p_lab[..., 0] < tiled_bayer
+        more = p_lab[..., 0] >= tiled_bayer
+        p_lab[..., 0][less] = p_lab[..., 0][less] - adjustment_factor
+        p_lab[..., 0][more] = p_lab[..., 0][more] + adjustment_factor
+        p_lab = (p_lab * (255, 1, 1)).clip(0, 255)
+        rgb_adj = cv2.cvtColor(p_lab.astype(np.uint8), cv2.COLOR_LAB2RGB).clip(0, 255)
     else:
-        result_img = Image.fromarray(img_array, 'RGB')
+        brightness = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+        less = brightness < tiled_bayer
+        more = brightness >= tiled_bayer
+        brightness[less] = 1 - adjustment_factor
+        brightness[more] = 1 + adjustment_factor
+        mul = np.dstack((brightness, brightness, brightness))
+        rgb_adj = np.clip(img_rgb.astype(np.float64) * mul.astype(np.float64),0,255).astype(np.uint8)
+
+    image = quantize_image(rgb_adj, color_key, True)
+
+    if has_alpha:
+        result_img = Image.fromarray(np.dstack((image, img_array[..., 3])), 'RGBA')
+    else:
+        result_img = Image.fromarray(image, 'RGB')
 
     return result_img
 
+
+def convert_legacy_array(arr):
+    min_x, min_y, max_x, max_y = 100, 100, -100, -100
+    for x, y, _ in arr:
+        min_x = min(min_x, x) 
+        max_x = max(max_x, x) 
+        min_y = min(min_y, y)
+        max_y = max(max_y, y) 
+    width, height = max_x - min_x + 1, max_y - min_y + 1
+    np_arr = np.zeros((height, width))
+    for x, y, coeff in arr:
+        np_arr[y - min_y, x - min_x] = coeff
+    return np_arr, min_y, min_x
 
 @register_processing_method(
     'Atkinson Dither',
@@ -1285,11 +1173,11 @@ def ordered_dithering(img, color_key, params):
 )
 def atkinson_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = [
+    diffusion_matrix = convert_legacy_array([
         (1, 0, 1 / 8), (2, 0, 1 / 8),
         (-1, 1, 1 / 8), (0, 1, 1 / 8), (1, 1, 1 / 8),
         (0, 2, 1 / 8),
-    ]
+    ])
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
@@ -1300,11 +1188,11 @@ def atkinson_dithering(img, color_key, params):
 )
 def stucki_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = [
+    diffusion_matrix = convert_legacy_array([
         (1, 0, 8 / 42), (2, 0, 4 / 42),
         (-2, 1, 2 / 42), (-1, 1, 4 / 42), (0, 1, 8 / 42), (1, 1, 4 / 42), (2, 1, 2 / 42),
         (-2, 2, 1 / 42), (-1, 2, 2 / 42), (0, 2, 4 / 42), (1, 2, 2 / 42), (2, 2, 1 / 42),
-    ]
+    ])
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
@@ -1315,12 +1203,12 @@ def stucki_dithering(img, color_key, params):
 )
 def floyd_steinberg_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = [
+    diffusion_matrix = convert_legacy_array([
         (1, 0, 7 / 16),
         (-1, 1, 3 / 16),
         (0, 1, 5 / 16),
         (1, 1, 1 / 16),
-    ]
+    ])
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
@@ -1331,11 +1219,11 @@ def floyd_steinberg_dithering(img, color_key, params):
 )
 def jarvis_judice_ninke_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = [
+    diffusion_matrix = convert_legacy_array([
         (1, 0, 7 / 48), (2, 0, 5 / 48),
         (-2, 1, 3 / 48), (-1, 1, 5 / 48), (0, 1, 7 / 48), (1, 1, 5 / 48), (2, 1, 3 / 48),
         (-2, 2, 1 / 48), (-1, 2, 3 / 48), (0, 2, 5 / 48), (1, 2, 3 / 48), (2, 2, 1 / 48),
-    ]
+    ])
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
@@ -1346,10 +1234,10 @@ def jarvis_judice_ninke_dithering(img, color_key, params):
 )
 def sierra2_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = [
+    diffusion_matrix = convert_legacy_array([
         (1, 0, 4/16), (2, 0, 3/16),
         (-2, 1, 1/16), (-1, 1, 2/16), (0, 1, 3/16), (1, 1, 2/16), (2, 1, 1/16),
-    ]
+    ])
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 @register_processing_method(
@@ -1360,55 +1248,33 @@ def sierra2_dithering(img, color_key, params):
 def random_dithering(img, color_key, params):
     global use_lab
 
+    # Convert the color key to an array
+    i = 0
+    diff_key = np.array(list(color_key.values()), dtype=np.uint8)
+
     strength = params.get('strength', 1.0)
 
-    img = img.copy()
-    width, height = img.size
-    pixels = img.load()
     has_alpha = img.mode == 'RGBA'
+    img_arr = np.array(img, dtype = np.uint8)
+    img_rgb = img_arr[..., :3]
+    if has_alpha:
+        img_a = img_arr[..., 3]
+    height, width = img_rgb.shape[:2]
 
     noise_std = 32 * strength
+    noise = np.random.normal(0, noise_std, (height, width))
+    noise = np.dstack((noise, noise, noise))
+    if use_lab:
+        noise *= (0.5, 0.25, 0.25)
+        img_rgb = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB).astype(np.float64)
+    img_rgb = img_rgb.astype(np.float64) + noise
+    img_rgb = img_rgb.clip(0, 255)
+    img_rgb = img_rgb.astype(np.uint8)
+    if use_lab:
+        img_rgb = cv2.cvtColor(img_rgb, cv2.COLOR_LAB2RGB)
+    img_rgb = quantize_image(img_rgb, diff_key, True)
 
-    def rgb_to_lab_single(rgb):
-        arr = np.uint8([[rgb]])
-        lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0, 0]
-        return lab
-
-    def lab_to_rgb_single(lab):
-        arr = np.uint8([[lab]])
-        rgb = cv2.cvtColor(arr, cv2.COLOR_LAB2RGB)[0, 0]
-        return rgb
-
-    for y in range(height):
-        for x in range(width):
-            old_pixel = pixels[x, y]
-            if has_alpha and old_pixel[3] == 0:
-                continue
-
-            old_pixel_rgb = old_pixel[:3]
-
-            if use_lab:
-                old_pixel_lab = rgb_to_lab_single(old_pixel_rgb)
-                l_noise = np.clip(old_pixel_lab[0] + np.random.normal(0, noise_std*0.5), 0, 255)
-                a_noise = np.clip(old_pixel_lab[1] + np.random.normal(0, noise_std*0.25), 0, 255)
-                b_noise = np.clip(old_pixel_lab[2] + np.random.normal(0, noise_std*0.25), 0, 255)
-
-                noisy_lab = (l_noise, a_noise, b_noise)
-                noisy_pixel = lab_to_rgb_single(noisy_lab)
-            else:
-                r = np.clip(old_pixel_rgb[0] + np.random.normal(0, noise_std), 0, 255)
-                g = np.clip(old_pixel_rgb[1] + np.random.normal(0, noise_std), 0, 255)
-                b = np.clip(old_pixel_rgb[2] + np.random.normal(0, noise_std), 0, 255)
-                noisy_pixel = (r, g, b)
-
-            noisy_pixel = tuple(int(c) for c in noisy_pixel)
-            new_pixel_num = find_closest_color(noisy_pixel, color_key)
-            new_pixel = color_key[new_pixel_num]
-
-            if has_alpha:
-                pixels[x, y] = new_pixel + (old_pixel[3],)
-            else:
-                pixels[x, y] = new_pixel
+    img = Image.fromarray(np.dstack((img_rgb, img_a)) if has_alpha else img_rgb, "RGBA" if has_alpha else "RGB")
 
     return img
 
@@ -1496,125 +1362,103 @@ def find_closest_colors_image(image_array, color_key):
 
     return mapped_data
 
-def distribute_error(pixels, x, y, width, height, quant_error, diffusion_matrix):
-    for dx, dy, coefficient in diffusion_matrix:
-        nx, ny = x + dx, y + dy
-        if 0 <= nx < width and 0 <= ny < height:
-            current_pixel = list(pixels[nx, ny])
-            has_alpha = (len(current_pixel) == 4)
-            if has_alpha and current_pixel[3] == 0:
-                continue
+def quantize_image(img_arr, color_key, force_no_lab = False):
+    global use_lab
 
-            for i in range(3):
-                val = current_pixel[i] + quant_error[i] * coefficient
-                current_pixel[i] = int(min(max(val, 0), 255))
-            pixels[nx, ny] = tuple(current_pixel)
+    # Find closest color to each pixel
+    diff_key = color_key
+    if use_lab and not force_no_lab:
+        diff_key = cv2.cvtColor(color_key[np.newaxis, :], cv2.COLOR_RGB2LAB)[0]
+        arr = img_arr[..., :3]
+        arr = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
+    else:
+        arr = img_arr[..., :3].astype(np.float64)
+    diff = np.abs(arr[..., np.newaxis] - diff_key.T[np.newaxis, np.newaxis, :]) # Get the absolute distance
+    diff = np.swapaxes(diff, 2, 3) # Swap the axes of the color channels and distances
+    dist = np.sum(diff, axis = 3) # Sum up the color channels to get total distances
+    idx_arr = np.argmin(dist, axis = 2) # Get the index of the lowest distance
+    return color_key[idx_arr] # Index the color values with the index array to get the snapped colors
 
 def optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix):
     global use_lab
 
-    img = img.copy()
-    has_alpha = (img.mode == 'RGBA')
-    img_array = np.array(img, dtype=np.uint8)
-    height, width = img_array.shape[:2]
+    t = time.perf_counter()
 
-    if has_alpha:
-        alpha_channel = img_array[:, :, 3]
-        alpha_mask = (alpha_channel > 0)
-    else:
-        alpha_mask = np.ones((height, width), dtype=bool)
-
-    color_nums = list(color_key.keys())
-    color_values_rgb = np.array(list(color_key.values()), dtype=np.uint8)
-    if use_lab:
-        color_values_lab = rgb_palette_to_lab(color_key).astype(np.float32)
-    else:
-        color_values_lab = None
-
-    def closest_color_func(pixel_rgb):
-        if use_lab:
-            arr = np.uint8([[pixel_rgb]])
-            p_lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0,0].astype(np.float32)
-            diff = color_values_lab - p_lab
-            dist_sq = np.sum(diff*diff, axis=1)
-            idx = np.argmin(dist_sq)
-        else:
-            p_f = pixel_rgb.astype(np.float32)
-            diff = color_values_rgb.astype(np.float32) - p_f
-            dist_sq = np.sum(diff*diff, axis=1)
-            idx = np.argmin(dist_sq)
-        return idx
-
-    img_array = img_array.astype(np.int16)
-
-    for y in range(height):
-        for x in range(width):
-            if not alpha_mask[y, x]:
-                continue
-
-            old_pixel = img_array[y, x]
-            old_pixel_rgb = old_pixel[:3]
-
-            idx = closest_color_func(old_pixel_rgb)
-            new_pixel = color_values_rgb[idx]
-
-            quant_error = [(o - n)*strength for o, n in zip(old_pixel_rgb, new_pixel)]
-
-            if has_alpha:
-                img_array[y, x, 0] = new_pixel[0]
-                img_array[y, x, 1] = new_pixel[1]
-                img_array[y, x, 2] = new_pixel[2]
-            else:
-                img_array[y, x, :3] = new_pixel
-
-            for dx, dy, coeff in diffusion_matrix:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < width and 0 <= ny < height and alpha_mask[ny, nx]:
-                    neighbor = img_array[ny, nx]
-                    nr = neighbor[0] + quant_error[0]*coeff
-                    ng = neighbor[1] + quant_error[1]*coeff
-                    nb = neighbor[2] + quant_error[2]*coeff
-                    img_array[ny, nx, 0] = int(min(max(nr, 0), 255))
-                    img_array[ny, nx, 1] = int(min(max(ng, 0), 255))
-                    img_array[ny, nx, 2] = int(min(max(nb, 0), 255))
-
-    img_array = np.clip(img_array, 0, 255).astype(np.uint8)
-
-    if has_alpha:
-        result_img = Image.fromarray(img_array, 'RGBA')
-    else:
-        result_img = Image.fromarray(img_array, 'RGB')
-
-    return result_img
-
-def error_diffusion_dithering(img, color_key, strength, diffusion_matrix, smoothing=False):
     width, height = img.size
-    pixels = img.load()
     has_alpha = img.mode == 'RGBA'
+    diffusion_matrix, ox, oy = diffusion_matrix
+    
+    img_arr = np.array(img.convert('RGBA'), dtype=np.uint8)
+    img_rgb, img_a = np.copy(img_arr[..., :3]), img_arr[..., 3]
 
+    # Convert the color key to an array
+    i = 0
+    col_key = []
+    diff_key = []
+    for i, value in enumerate(color_key.values()):
+        value = np.array(value, dtype = np.uint8)
+        if use_lab:
+            diff_key.append(rgb_to_lab(*value))
+        else:
+            diff_key.append(value)
+        col_key.append(value)
+    color_key = np.array(col_key, dtype=np.uint8)
+    diff_key = np.array(diff_key, dtype=np.float64)
+
+    jit_diffuse(img_rgb, diffusion_matrix, color_key, diff_key, strength, ox, oy, use_lab)
+    img_rgb = quantize_image(img_rgb, color_key, True)
+    im = Image.fromarray(np.dstack((img_rgb, img_a[..., np.newaxis])), "RGBA")
+    return im
+
+@numba.jit([numba.float64[:](numba.uint8, numba.uint8, numba.uint8)], nopython=True)
+def rgb_to_lab(r, g, b):
+    rgb = np.array((r, g, b), dtype=np.float64) / 255
+    rgb_to_xyz_matrix = np.array([
+        [ 0.4124564,  0.3575761,  0.1804375 ],
+        [ 0.2126729,  0.7151533,  0.0721737 ],
+        [ 0.0193339,  0.1191920,  0.9504741 ]
+    ], dtype=np.float64).T
+    xyz = rgb.astype(np.float64) @ rgb_to_xyz_matrix
+    whitepoint = np.array((0.950456, 1.0000, 1.088754), dtype=np.float64) # D65 white point
+    x, y, z = xyz / whitepoint
+    lab = np.empty((3, ), dtype=np.float64)
+    lab[0] = ((116 * (y**0.3333) - 16) if y > 0.008856 else (903.3 * y))
+    lab[0] *= 255 / 100
+    lab[1] = 500 * (((x**0.3333) if x > 0.008556 else (7.787*x + 16/116)) - (y**0.3333) if y > 0.008556 else (7.787*y + 16/116)) + 128
+    lab[2] = 200 * (((y**0.3333) if y > 0.008556 else (7.787*y + 16/116)) - (z**0.3333) if z > 0.008556 else (7.787*z + 16/116)) + 128
+    return lab
+
+@numba.jit(numba.void(numba.uint8[:, :, :], numba.float64[:, :], numba.uint8[:, :], numba.float64[:, :], numba.float64, numba.int32, numba.int32, numba.uint8), nopython=True)
+def jit_diffuse(image_arr, diffusion_matrix, color_key, diff_key, strength, ox, oy, use_lab):
+    height, width = image_arr.shape[:2]
+    diff_height, diff_width = diffusion_matrix.shape[:2]
     for y in range(height):
         for x in range(width):
-            old_pixel = pixels[x, y]
-            if has_alpha and old_pixel[3] == 0:
-                continue
-            old_pixel_rgb = old_pixel[:3]
+            col = image_arr[y, x]
 
-            new_pixel_num = find_closest_color(old_pixel_rgb, color_key)
-            new_pixel = color_key[new_pixel_num]
-
-            quant_error = tuple((o - n) * strength for o, n in zip(old_pixel_rgb, new_pixel))
-
-            if has_alpha:
-                pixels[x, y] = new_pixel + (old_pixel[3],)
+            # Get closest color
+            if use_lab:
+                diff_col = rgb_to_lab(col[0], col[1], col[2])
             else:
-                pixels[x, y] = new_pixel
+                diff_col = col.astype(np.float64)
+            diff = np.abs(diff_col - diff_key)
+            diff = np.sum(diff, axis = 1)
+            idx = np.argmin(diff)
+            quant = color_key[idx]
+            err = (col.astype(np.float64) - quant.astype(np.float64)) * strength
 
-            distribute_error(pixels, x, y, width, height, quant_error, diffusion_matrix)
+            image_arr[y, x] = quant
 
-    return img
+            for dy in range(diff_height):
+                for dx in range(diff_width):
+                    if diffusion_matrix[dy, dx] != 0:
+                        nx, ny = x + dx + ox, y + dy + oy
+                        if 0 <= nx < width and 0 <= ny < height:
+                            neighbor = image_arr[int(ny), int(nx)]
+                            nb = neighbor + err * diffusion_matrix[dy, dx]
+                            image_arr[int(ny), int(nx)] = nb.clip(0, 255)
+
 #Processing End
-
-
 
 
 def process_and_save_image(img, target_size, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag, progress_callback=None, message_callback=None, error_callback=None):
@@ -1664,6 +1508,8 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
         img = img.copy()
         pixels = img.load()
         width, height = img.size
+        
+        # TODO: Manual looping could be accelerated with numpy
         for y in range(height):
             for x in range(width):
                 pixel = pixels[x, y]
@@ -1695,6 +1541,7 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
 
             # Process each pixel
             pixels = img.load()
+            # TODO: Manual looping could be accelerated with numpy (vectorize find_closest_color with the quantize_image function)
             for y in range(height - 1, -1, -1):  # Process from bottom to top
                 for x in range(width):
                     try:
@@ -1731,6 +1578,7 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
 
     except Exception as e:
         if error_callback:
+            traceback.print_exc()
             error_callback(f"An error occurred: {e}")
 
 def save_image(img, preview_path, color_key_array):
@@ -1832,6 +1680,7 @@ def save_image(img, preview_path, color_key_array):
     output_array = np.zeros_like(img_array)
 
     # Process each pixel
+    # TODO: Manual looping could be accelerated with numpy
     for y in range(img_array.shape[0]):
         for x in range(img_array.shape[1]):
             pixel_rgb = tuple(rgb_array[y, x])  # Current pixel RGB
@@ -2013,6 +1862,7 @@ def process_and_save_gif(
                 Frame1Array = -1 * np.ones((height, width), dtype=np.int32)
                 first_frame_pixels = -1 * np.ones((height, width), dtype=np.int32)
 
+                # TODO: Manual looping could be accelerated with numpy
                 for y in range(height):
                     for x in range(width):
                         if mask[y, x]:
@@ -2047,6 +1897,7 @@ def process_and_save_gif(
                 # Initialize CurrentFrameArray
                 CurrentFrameArray = -1 * np.ones((height, width), dtype=np.int32)
 
+                # TODO: Manual looping could be accelerated with numpy
                 for y in range(height):
                     for x in range(width):
                         if mask[y, x]:
@@ -2258,8 +2109,6 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
 
         # Construct color_key from color_key_array
         color_key = build_color_key(color_key_array)
-     
-        
 
         for frame_number in range(1, total_frames + 1):  # Start frame numbering from 1
             img.seek(frame_number - 1)
@@ -2291,6 +2140,7 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
             width, height = frame.size
             opacity_threshold = 204  # 80% opacity (255 * 0.8)
 
+            # TODO: Manual looping could be accelerated with numpy
             for y in range(height):
                 for x in range(width):
                     r, g, b, a = pixels[x, y]
