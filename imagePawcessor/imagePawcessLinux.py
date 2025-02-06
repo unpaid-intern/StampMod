@@ -1,14 +1,14 @@
 import os
-import io
 import sys
+import io
 import random
-import traceback
 import threading
 import tempfile
 import json
 import time
 import math
 import numba
+from numba import njit, prange
 from pathlib import Path
 import socket
 from filelock import FileLock, Timeout
@@ -36,8 +36,6 @@ from PySide6.QtCore import (
     Qt, Signal, QObject, QTimer, QPropertyAnimation, QEasingCurve, QPoint, QSize, QThread, Slot, QRect, QBuffer, QIODevice
 )
 
-
-
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
 
@@ -48,9 +46,6 @@ def get_base_path() -> Path:
 
 
     return base_path.parent
-
-
-
 
 def exe_path_fs(relative_path: str) -> Path:
     base_path = get_base_path()
@@ -75,8 +70,6 @@ def get_appdata_dir() -> Path:
     appdata_dir = appdata_base / "webfishing_stamps_mod"
     appdata_dir.mkdir(parents=True, exist_ok=True)  # Ensure it exists
     return appdata_dir
-
-
 
 def get_config_path() -> Path:
     """
@@ -106,6 +99,19 @@ def get_config_path() -> Path:
     config_file = config_dir / "PurplePuppy.Stamps.json"
 
     return config_file
+
+IPC_HOST = '127.0.0.1'
+IPC_PORT = 65432
+LOCK_FILE = Path(tempfile.gettempdir()) / 'imagePawcessor.lock'
+LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
+app_lock = None
+
+processing_method_registry = {}
+use_lab = False
+has_chalks = False
+chalks_colors = False
+first = False
+brightness = 0.5
 
 
 def get_clipboard_image_via_pyside6():
@@ -188,21 +194,6 @@ def get_clipboard_image():
         return img
 
     return get_clipboard_image_fallback()
-
-IPC_HOST = '127.0.0.1'
-IPC_PORT = 65432
-LOCK_FILE = Path(tempfile.gettempdir()) / 'imagePawcessor.lock'
-LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-app_lock = None
-
-processing_method_registry = {}
-use_lab = False
-has_chalks = False
-chalks_colors = False
-first = False
-brightness = 0.5
-
-
 
 def register_processing_method(name, default_params=None, description=""):
     """
@@ -313,7 +304,6 @@ def apply_gamma_correction(rgb_image_uint8, gamma):
         rgb_image_uint8 = cv2.LUT(rgb_image_uint8, table)
     return rgb_image_uint8
 
-
 def apply_unsharp_mask(
     image,
     unsharp_strength=1.0,
@@ -350,7 +340,6 @@ def apply_unsharp_mask(
     sharpened_bgr = cv2.cvtColor(lab_sharpened, cv2.COLOR_Lab2BGR)
 
     return sharpened_bgr
-
 
 
 def apply_clahe(
@@ -434,6 +423,8 @@ def apply_clahe(
     return output_rgb
 
 
+
+
 def restore_non_opaque_pixels(rgb_image_uint8, original_rgb, opaque_mask):
     """
     Restore the original RGB values for non-opaque pixels 
@@ -444,30 +435,35 @@ def restore_non_opaque_pixels(rgb_image_uint8, original_rgb, opaque_mask):
 
 
 ###############################################################################
-#                   Automatic Brightness Functions (for chalks_colors)        #
+#                   Automatic Brightness Functions     #
 ###############################################################################
 
 def auto_brightness_rgb(rgb_image_uint8, opaque_mask):
     """
     A minimal 'auto brightness' approach in RGB:
-    - We measure the average luminance of opaque pixels.
-    - If average is far from ~128, we shift the entire image up/down accordingly.
+      - Measures the average luminance (using 0.299,0.587,0.114) of opaque pixels.
+      - Shifts the image so that the average is near 128.
+      - Applies an asymmetric correction:
+          • Dark images are brightened up to +50.
+          • Bright images are darkened only up to -25.
+      - This pre-adjustment is intended for later matching to a 6-color palette.
     """
     float_img = rgb_image_uint8.astype(np.float32)
-    lum = 0.299 * float_img[opaque_mask, 0] + \
-          0.587 * float_img[opaque_mask, 1] + \
-          0.114 * float_img[opaque_mask, 2]
-    avg_lum = np.mean(lum) if len(lum) > 0 else 128
-
-    # Decide a neutral target, e.g. 128
+    # Compute luminance over opaque pixels.
+    lum = (0.299 * float_img[opaque_mask, 0] +
+           0.587 * float_img[opaque_mask, 1] +
+           0.114 * float_img[opaque_mask, 2])
+    avg_lum = np.mean(lum) if len(lum) > 0 else 128.0
     target_lum = 128.0
     diff = target_lum - avg_lum
 
-    # Don't overcorrect (cap ±50 for instance)
-    diff = np.clip(diff, -50, 50)
+    # Apply asymmetric clipping: allow stronger brightening than darkening.
+    if diff < 0:
+        diff = np.clip(diff, -25, 0)
+    else:
+        diff = np.clip(diff, 0, 50)
 
     float_img[opaque_mask] += diff
-
     out = np.clip(float_img, 0, 255).astype(np.uint8)
     return out
 
@@ -475,19 +471,24 @@ def auto_brightness_rgb(rgb_image_uint8, opaque_mask):
 def auto_brightness_lab(rgb_image_uint8, opaque_mask):
     """
     A minimal 'auto brightness' approach in LAB:
-    - Convert to LAB, measure average L on opaque pixels.
-    - Shift L toward ~128 or some mid-range. 
-    - Clamp the shift to avoid major distortion.
+      - Converts the image to Lab, measures the average L value on opaque pixels.
+      - Shifts L toward 128 with asymmetric correction:
+          • Dark images are brightened up to +50.
+          • Bright images are darkened only up to -25.
+      - Converts back to RGB.
     """
     lab = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB).astype(np.float32)
     l_channel, a_channel, b_channel = cv2.split(lab)
 
     l_opaque = l_channel[opaque_mask]
-    avg_l = np.mean(l_opaque) if l_opaque.size > 0 else 128
-
+    avg_l = np.mean(l_opaque) if l_opaque.size > 0 else 128.0
     target_l = 128.0
     diff = target_l - avg_l
-    diff = np.clip(diff, -30, 30)
+
+    if diff < 0:
+        diff = np.clip(diff, -25, 0)
+    else:
+        diff = np.clip(diff, 0, 50)
 
     l_channel[opaque_mask] += diff
     l_channel = np.clip(l_channel, 0, 255)
@@ -503,23 +504,38 @@ def auto_brightness_lab(rgb_image_uint8, opaque_mask):
 
 def adjust_brightness_and_range_rgb(rgb_image_uint8, opaque_mask, user_brightness, 
                                     min_brightness, max_brightness):
-
+    """
+    Adjust brightness and range in RGB.
+    
+    Note: The 'user_brightness' parameter is ignored.
+    
+    This function automatically adjusts the brightness of opaque areas so that
+    their average luminance (computed in Lab) is shifted toward mid-range (128).
+    The adjustment is asymmetric (darker images are brightened more than bright
+    images are darkened). Finally, a channel-by-channel range alignment is applied 
+    (mapping each channel's 1st to 99th percentile into [min_brightness, max_brightness]).
+    """
     float_img = rgb_image_uint8.astype(np.float32)
-
-    # (1) Convert to Lab to do the user brightness shift
-    lab = cv2.cvtColor(float_img.astype(np.uint8), cv2.COLOR_RGB2LAB)
+    # Convert to Lab to work with luminance.
+    lab = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab)
 
-    shift_val = (user_brightness - 0.5) * 100.0
-    l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + shift_val, 0, 255)
+    # Automatic brightness shift (user_brightness is ignored)
+    l_opaque = l_channel[opaque_mask]
+    avg_l = np.mean(l_opaque) if l_opaque.size > 0 else 128.0
+    target_l = 128.0
+    diff = target_l - avg_l
+    if diff < 0:
+        diff = np.clip(diff, -25, 0)
+    else:
+        diff = np.clip(diff, 0, 50)
+    l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + diff, 0, 255)
 
+    # Convert back to RGB for range alignment.
     merged_lab = cv2.merge((l_channel, a_channel, b_channel))
     out_img = cv2.cvtColor(merged_lab, cv2.COLOR_LAB2RGB).astype(np.float32)
 
-    # (2) Now do a mini range alignment in RGB or Lab. 
-    #     For consistency, let's do it in Lab again, or do it channel-by-channel in RGB.
-
-    # Example: do old style in RGB (channel-by-channel):
+    # Channel-by-channel range alignment on opaque pixels.
     for c in range(3):
         channel_data = out_img[..., c][opaque_mask]
         c_min = np.percentile(channel_data, 1)
@@ -536,35 +552,45 @@ def adjust_brightness_and_range_rgb(rgb_image_uint8, opaque_mask, user_brightnes
 
 def adjust_brightness_and_range_lab(rgb_image_uint8, opaque_mask, user_brightness, 
                                     min_brightness, max_brightness):
-
-    # --- (1) Convert to Lab ---
+    """
+    Adjust brightness and range in LAB.
+    
+    Note: The 'user_brightness' parameter is ignored.
+    
+    This function automatically adjusts the L channel (brightness) of opaque areas
+    to shift the average toward 128 with an asymmetric correction 
+    (darker images get brightened more than bright images get darkened). Then,
+    the L channel is range-aligned so that its 1st to 99th percentiles map into
+    [min_brightness, max_brightness]. Finally, the image is converted back to RGB.
+    """
     lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
     l_channel, a_channel, b_channel = cv2.split(lab_image)
 
-    # --- (2) User brightness shift ---
-    shift_val = (user_brightness - 0.5) * 100.0
-    l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + shift_val, 0, 255)
+    # Automatic brightness shift (ignoring user_brightness)
+    l_opaque = l_channel[opaque_mask]
+    avg_l = np.mean(l_opaque) if l_opaque.size > 0 else 128.0
+    target_l = 128.0
+    diff = target_l - avg_l
+    if diff < 0:
+        diff = np.clip(diff, -25, 0)
+    else:
+        diff = np.clip(diff, 0, 50)
+    l_channel[opaque_mask] = np.clip(l_channel[opaque_mask] + diff, 0, 255)
 
-    # --- (3) Range alignment (the missing piece) ---
-    #    We re-scale the final L channel so that [1%ile ... 99%ile] 
-    #    becomes [min_brightness ... max_brightness].
-    #    This keeps the final image from going super-white or black.
+    # Range alignment: map [1%ile, 99%ile] of the L channel to [min_brightness, max_brightness]
     l_opaque = l_channel[opaque_mask]
     current_min = np.percentile(l_opaque, 1)
     current_max = np.percentile(l_opaque, 99)
     denom = (current_max - current_min) if (current_max > current_min) else 1e-5
     range_ratio = (max_brightness - min_brightness) / denom
 
-    # Apply the scale
-    # We shift so that current_min -> min_brightness, and current_max -> max_brightness
     l_scaled = (l_opaque - current_min) * range_ratio + min_brightness
     l_channel[opaque_mask] = np.clip(l_scaled, 0, 255)
 
-    # --- (4) Convert back to RGB ---
     merged_lab = cv2.merge((l_channel, a_channel, b_channel))
     adjusted_rgb = cv2.cvtColor(merged_lab, cv2.COLOR_LAB2RGB)
-
     return adjusted_rgb
+
 
 ###############################################################################
 #           Dynamic Determination of Boost and Threshold (Existing)           #
@@ -667,12 +693,83 @@ def selective_color_boost_hsv(rgb_image_uint8, opaque_mask, color_key_array, dyn
     return boosted_rgb
 
 
-def selective_color_boost_lab_stub(rgb_image_uint8, opaque_mask, color_key_array, dynamic_settings):
+import numpy as np
+import cv2
+
+def selective_color_boost_lab_fixed(
+    rgb_image_uint8,
+    opaque_mask,
+    color_key_array,
+    dynamic_settings
+):
     """
-    Placeholder for LAB-based color boosting if needed.
-    Currently a no-op or minimal approach.
+    A replacement for 'selective_color_boost_lab_stub' that avoids shifting 
+    dark blues/greens into red or other unintended hues in Lab space.
+
+    - rgb_image_uint8:   (H, W, 3) uint8 image.
+    - opaque_mask:       (H, W) boolean mask (True for pixels to adjust).
+    - color_key_array:   (optional) data about colors; not deeply used here.
+    - dynamic_settings:  (dict) might contain e.g. 'lab_boost_factor'.
+    
+    Returns:
+        The updated rgb_image_uint8 in-place (also returned) with boosted color.
     """
+
+    # 1) Convert from RGB to Lab (OpenCV range: L[0..255], a[0..255], b[0..255]).
+    lab_image = cv2.cvtColor(rgb_image_uint8, cv2.COLOR_RGB2LAB)
+
+    # Convert to float32 for safe arithmetic.
+    lab_f32 = lab_image.astype(np.float32)
+
+    # 2) Separate the three channels
+    L_channel = lab_f32[:, :, 0]
+    a_channel = lab_f32[:, :, 1]
+    b_channel = lab_f32[:, :, 2]
+
+    # 3) In OpenCV's Lab:
+    #    L in [0..255], a in [0..255], b in [0..255]
+    #    The "real" Lab often has L in [0..100], a,b in ~[-128..+128].
+    #    So let's shift a,b down by 128 so that 128->0 is neutral.
+    a_channel -= 128.0
+    b_channel -= 128.0
+
+    # 4) Apply a saturation-like boost. You can tweak the factor as desired.
+    #    You might store this in 'dynamic_settings.get("lab_boost_factor", 1.2)' or similar.
+    boost_factor = dynamic_settings.get("lab_boost_factor", 1.25)
+
+    # Typically, you either:
+    # (A) Multiply a,b by the same factor, or
+    # (B) Increase magnitude of (a,b) from their neutral center (0,0).
+    # We'll do a simple uniform scale here:
+    a_channel *= boost_factor
+    b_channel *= boost_factor
+
+    # 5) Clamp a,b back into the valid [-128..127] range
+    a_channel = np.clip(a_channel, -128, 127)
+    b_channel = np.clip(b_channel, -128, 127)
+
+    # 6) Shift a,b back up by +128 to restore OpenCV’s range.
+    a_channel += 128.0
+    b_channel += 128.0
+
+    # 7) Place the channels back, and also clamp L to [0..255].
+    #    (Some code also remaps L to a narrower [0..100], but we’ll stay consistent with OpenCV.)
+    lab_f32[:, :, 0] = np.clip(L_channel, 0, 255)
+    lab_f32[:, :, 1] = np.clip(a_channel, 0, 255)
+    lab_f32[:, :, 2] = np.clip(b_channel, 0, 255)
+
+    # Convert back to uint8
+    lab_fixed = lab_f32.astype(np.uint8)
+
+    # 8) Convert Lab -> RGB
+    boosted_rgb = cv2.cvtColor(lab_fixed, cv2.COLOR_LAB2RGB)
+
+    # 9) Write back only into opaque pixels, in-place.
+    #    (If you prefer to modify all pixels, remove the mask indexing.)
+    rgb_image_uint8[opaque_mask] = boosted_rgb[opaque_mask]
+
     return rgb_image_uint8
+
 
 
 ###############################################################################
@@ -751,7 +848,7 @@ def preprocess_image(
         params = {
             'alpha_threshold': 191,
             'clahe_clip_limit': 1.0,
-            'clahe_grid_size': 8,
+            'clahe_grid_size': 4,
             'unsharp_strength': 1.2, 
             'unsharp_radius': 2.0,
             'gamma_correction': 1.0,  
@@ -760,8 +857,8 @@ def preprocess_image(
     else:
         params = {
             'alpha_threshold': 191,
-            'clahe_clip_limit': 4.0,
-            'clahe_grid_size': 8,
+            'clahe_clip_limit': 3.5,
+            'clahe_grid_size': 6,
             'unsharp_strength': 1.5,
             'unsharp_radius': 2,
             'gamma_correction': 0.9,
@@ -875,7 +972,7 @@ def preprocess_image(
 
         if default_steps['color_boost']:
             if use_lab:
-                rgb_image_uint8 = selective_color_boost_lab_stub(
+                rgb_image_uint8 = selective_color_boost_lab_fixed(
                     rgb_image_uint8,
                     opaque_mask,
                     color_key_array,
@@ -983,20 +1080,428 @@ def resize_image(img, target_size):
     except Exception as e:
         raise RuntimeError(f"Failed to resize the image: {e}")
 
-def process_image(img, color_key, process_mode, process_params):
+
+def adjust_brightness(image, brightness):
     """
-    Dispatches image processing to the appropriate method based on process_mode.
+    Adjusts the brightness of a PIL image in the RGB space.
+
+    The brightness parameter should range from -0.5 to 1.5, where:
+      - brightness = -0.5 yields a completely black image,
+      - brightness = 0.5 yields no change, and
+      - brightness = 1.5 yields a completely white image.
+      
+    For brightness values below 0.5, the image is darkened by multiplying
+    all pixel values by a factor; for brightness values above 0.5, the image is 
+    brightened by linearly blending the original image with white.
+
+    :param image: A PIL.Image instance.
+    :param brightness: A float in the range [-0.5, 1.5].
+    :return: A new PIL.Image with adjusted brightness.
     """
-    global use_lab
-    img = img.copy()
-    if process_mode in processing_method_registry:
-        processing_function = processing_method_registry[process_mode]
-        return processing_function(img, color_key, process_params)
+    # Convert the PIL image to a NumPy array of type float32 for processing.
+    arr = np.array(image).astype(np.float32)
+    
+    if brightness < 0.5:
+        # For darkening: map brightness from [-0.5, 0.5] to a scale factor [0, 1].
+        # At brightness = -0.5, factor = 0 (black); at brightness = 0.5, factor = 1 (no change).
+        factor = (brightness + 0.5)  # This is linear: e.g., brightness=0.25 gives factor=0.75.
+        new_arr = factor * arr
     else:
-        # Default to color matching if unknown process_mode
-        return color_matching(img, color_key, process_params)
+        # For brightening: map brightness from [0.5, 1.5] to a blend factor [0, 1].
+        # At brightness = 0.5, factor = 0 (no change); at brightness = 1.5, factor = 1 (white).
+        factor = (brightness - 0.5)  # For example, brightness=1.0 gives factor=0.5.
+        new_arr = (1 - factor) * arr + factor * 255
+
+    # Ensure values are within the valid range and convert back to uint8.
+    new_arr = np.clip(new_arr, 0, 255).astype(np.uint8)
+    
+    # Convert the NumPy array back to a PIL Image and return it.
+    return Image.fromarray(new_arr)
 
 
+
+# ---------------------------------------------------------------------
+# Single canonical definition of rgb_to_lab_numba (scaled L to 0..255).
+# ---------------------------------------------------------------------
+@njit(cache=True)
+def rgb_to_lab_numba(r, g, b):
+    # Convert from [0,255] to [0,1]
+    R = r / 255.0
+    G = g / 255.0
+    B = b / 255.0
+
+    # Gamma correction
+    if R > 0.04045:
+        R = ((R + 0.055) / 1.055) ** 2.4
+    else:
+        R = R / 12.92
+    if G > 0.04045:
+        G = ((G + 0.055) / 1.055) ** 2.4
+    else:
+        G = G / 12.92
+    if B > 0.04045:
+        B = ((B + 0.055) / 1.055) ** 2.4
+    else:
+        B = B / 12.92
+
+    # Convert to XYZ using the sRGB matrix
+    X = R * 0.4124 + G * 0.3576 + B * 0.1805
+    Y = R * 0.2126 + G * 0.7152 + B * 0.0722
+    Z = R * 0.0193 + G * 0.1192 + B * 0.9505
+
+    # Normalize for D65 white point
+    X /= 0.95047
+    Y /= 1.00000
+    Z /= 1.08883
+
+    # f(t) function with threshold 0.008856
+    if X > 0.008856:
+        fx = X ** (1.0/3.0)
+    else:
+        fx = 7.787 * X + 16.0/116.0
+
+    if Y > 0.008856:
+        fy = Y ** (1.0/3.0)
+    else:
+        fy = 7.787 * Y + 16.0/116.0
+
+    if Z > 0.008856:
+        fz = Z ** (1.0/3.0)
+    else:
+        fz = 7.787 * Z + 16.0/116.0
+
+    # Compute L, a, b (scale L from [0,100] to [0,255])
+    L = 116.0 * fy - 16.0
+    a_val = 500.0 * (fx - fy)
+    b_val = 200.0 * (fy - fz)
+    L *= (255.0 / 100.0)
+    return L, a_val, b_val
+
+# ------------------------------------------------------------------------------
+# map_pixels_rgb / map_pixels_lab: single definitions for entire-image mapping
+# ------------------------------------------------------------------------------
+@njit(parallel=True, cache=True)
+def map_pixels_rgb(pixels, palette):
+    """
+    For each pixel in 'pixels' (H x W x 3 float32), find the closest color in palette (N x 3 float32).
+    Returns a new array of the same shape with quantized values in [0..255].
+    """
+    H, W, _ = pixels.shape
+    out = np.empty_like(pixels)
+    n_palette = palette.shape[0]
+
+    for i in prange(H):
+        for j in range(W):
+            r = pixels[i, j, 0]
+            g = pixels[i, j, 1]
+            b = pixels[i, j, 2]
+            best_index = 0
+            best_dist = 1e10
+            for k in range(n_palette):
+                dr = r - palette[k, 0]
+                dg = g - palette[k, 1]
+                db = b - palette[k, 2]
+                dist = dr*dr + dg*dg + db*db
+                if dist < best_dist:
+                    best_dist = dist
+                    best_index = k
+            out[i, j, 0] = palette[best_index, 0]
+            out[i, j, 1] = palette[best_index, 1]
+            out[i, j, 2] = palette[best_index, 2]
+    return out
+
+@njit(parallel=True, cache=True)
+def map_pixels_lab(pixels, palette_rgb, palette_lab):
+    """
+    For each pixel in 'pixels' (H x W x 3 float32), convert to LAB, then find the closest palette color
+    using LAB distance. Returns an array with quantized values in [0..255].
+    """
+    H, W, _ = pixels.shape
+    out = np.empty_like(pixels)
+    n_palette = palette_rgb.shape[0]
+
+    for i in prange(H):
+        for j in range(W):
+            r = pixels[i, j, 0]
+            g = pixels[i, j, 1]
+            b = pixels[i, j, 2]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            best_index = 0
+            best_dist = 1e10
+
+            for k in range(n_palette):
+                dL = L - palette_lab[k, 0]
+                da = a_val - palette_lab[k, 1]
+                db = b_val - palette_lab[k, 2]
+                dist = dL*dL + da*da + db*db
+                if dist < best_dist:
+                    best_dist = dist
+                    best_index = k
+
+            out[i, j, 0] = palette_rgb[best_index, 0]
+            out[i, j, 1] = palette_rgb[best_index, 1]
+            out[i, j, 2] = palette_rgb[best_index, 2]
+    return out
+
+# ------------------------------------------------------------------------------
+# Numba-compiled function for error diffusion.
+# ------------------------------------------------------------------------------
+@njit(cache=True)
+def optimized_error_diffusion_dithering_numba(
+    img_array, alpha_mask, width, height, strength,
+    palette_rgb, palette_lab, diffusion_matrix, use_lab_flag
+):
+    """
+    Loops over each pixel, finds the closest palette color,
+    computes the quantization error, and distributes it.
+    """
+    n_palette = palette_rgb.shape[0]
+    n_diff = diffusion_matrix.shape[0]
+
+    for y in range(height):
+        for x in range(width):
+            if not alpha_mask[y, x]:
+                continue
+
+            old_r = img_array[y, x, 0]
+            old_g = img_array[y, x, 1]
+            old_b = img_array[y, x, 2]
+
+            # Find the closest color in palette
+            best_index = 0
+            best_dist = 1e10
+
+            if use_lab_flag:
+                L, a_val, b_val = rgb_to_lab_numba(old_r, old_g, old_b)
+                for i in range(n_palette):
+                    dL = L - palette_lab[i, 0]
+                    da = a_val - palette_lab[i, 1]
+                    db = b_val - palette_lab[i, 2]
+                    dist = dL*dL + da*da + db*db
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_index = i
+            else:
+                for i in range(n_palette):
+                    dr = old_r - palette_rgb[i, 0]
+                    dg = old_g - palette_rgb[i, 1]
+                    db = old_b - palette_rgb[i, 2]
+                    dist = dr*dr + dg*dg + db*db
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_index = i
+
+            new_r = palette_rgb[best_index, 0]
+            new_g = palette_rgb[best_index, 1]
+            new_b = palette_rgb[best_index, 2]
+
+            err_r = (old_r - new_r) * strength
+            err_g = (old_g - new_g) * strength
+            err_b = (old_b - new_b) * strength
+
+            # Quantize current pixel
+            img_array[y, x, 0] = new_r
+            img_array[y, x, 1] = new_g
+            img_array[y, x, 2] = new_b
+
+            # Distribute error
+            for i in range(n_diff):
+                dx = int(diffusion_matrix[i, 0])
+                dy = int(diffusion_matrix[i, 1])
+                coeff = diffusion_matrix[i, 2]
+                nx = x + dx
+                ny = y + dy
+
+                if 0 <= nx < width and 0 <= ny < height and alpha_mask[ny, nx]:
+                    r_val = img_array[ny, nx, 0] + err_r * coeff
+                    g_val = img_array[ny, nx, 1] + err_g * coeff
+                    b_val = img_array[ny, nx, 2] + err_b * coeff
+
+                    # Clamp
+                    if r_val < 0:
+                        r_val = 0.0
+                    elif r_val > 255:
+                        r_val = 255.0
+                    if g_val < 0:
+                        g_val = 0.0
+                    elif g_val > 255:
+                        g_val = 255.0
+                    if b_val < 0:
+                        b_val = 0.0
+                    elif b_val > 255:
+                        b_val = 255.0
+
+                    img_array[ny, nx, 0] = r_val
+                    img_array[ny, nx, 1] = g_val
+                    img_array[ny, nx, 2] = b_val
+
+# ------------------------------------------------------------------------------
+# Public error diffusion function that calls the numba-compiled core.
+# ------------------------------------------------------------------------------
+def optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix):
+    global use_lab
+
+    img = img.copy()
+    img_array = np.array(img, dtype=np.float32)
+    height, width = img_array.shape[:2]
+
+    # Alpha mask
+    has_alpha = (img.mode == 'RGBA')
+    if has_alpha:
+        alpha_channel = img_array[:, :, 3]
+        alpha_mask = (alpha_channel > 0)
+    else:
+        alpha_mask = np.ones((height, width), dtype=np.bool_)
+
+    # Build palette
+    palette_rgb = np.array(list(color_key.values()), dtype=np.float32)
+    if use_lab:
+        n = palette_rgb.shape[0]
+        palette_lab = np.empty((n, 3), dtype=np.float32)
+        for i in range(n):
+            r = palette_rgb[i, 0]
+            g = palette_rgb[i, 1]
+            b = palette_rgb[i, 2]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            palette_lab[i, 0] = L
+            palette_lab[i, 1] = a_val
+            palette_lab[i, 2] = b_val
+    else:
+        palette_lab = np.empty((0, 3), dtype=np.float32)
+
+    diffusion_matrix = np.array(diffusion_matrix, dtype=np.float32)
+    optimized_error_diffusion_dithering_numba(
+        img_array, alpha_mask, width, height, strength,
+        palette_rgb, palette_lab, diffusion_matrix, use_lab
+    )
+
+    # Clamp and reassemble
+    rgb_result = np.clip(img_array[:, :, :3], 0, 255).astype(np.uint8)
+    if has_alpha:
+        alpha_result = np.array(img)[:, :, 3]
+        result_array = np.dstack((rgb_result, alpha_result))
+        mode = 'RGBA'
+    else:
+        result_array = rgb_result
+        mode = 'RGB'
+
+    return Image.fromarray(result_array, mode)
+
+# ------------------------------------------------------------------------------
+# Single-pixel palette lookup: finds the one closest color in either LAB or RGB
+# ------------------------------------------------------------------------------
+@njit(cache=True)
+def find_closest_color_numba(pixel, palette_rgb, palette_lab, use_lab_flag):
+    best_index = 0
+    best_dist = 1e10
+    if use_lab_flag and palette_lab.shape[0] > 0:
+        L, a_val, b_val = rgb_to_lab_numba(pixel[0], pixel[1], pixel[2])
+        for i in range(palette_lab.shape[0]):
+            dL = L - palette_lab[i, 0]
+            da = a_val - palette_lab[i, 1]
+            db = b_val - palette_lab[i, 2]
+            dist = dL*dL + da*da + db*db
+            if dist < best_dist:
+                best_dist = dist
+                best_index = i
+    else:
+        for i in range(palette_rgb.shape[0]):
+            dr = pixel[0] - palette_rgb[i, 0]
+            dg = pixel[1] - palette_rgb[i, 1]
+            db = pixel[2] - palette_rgb[i, 2]
+            dist = dr*dr + dg*dg + db*db
+            if dist < best_dist:
+                best_dist = dist
+                best_index = i
+    return best_index
+
+def find_closest_color(pixel, color_key):
+    global use_lab
+    pixel_arr = np.array(pixel, dtype=np.float32)
+    palette_rgb = np.array(list(color_key.values()), dtype=np.float32)
+    color_nums = list(color_key.keys())
+
+    if use_lab:
+        n = palette_rgb.shape[0]
+        palette_lab = np.empty((n, 3), dtype=np.float32)
+        for i in range(n):
+            r = palette_rgb[i, 0]
+            g = palette_rgb[i, 1]
+            b = palette_rgb[i, 2]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            palette_lab[i, 0] = L
+            palette_lab[i, 1] = a_val
+            palette_lab[i, 2] = b_val
+    else:
+        palette_lab = np.empty((0, 3), dtype=np.float32)
+
+    idx = find_closest_color_numba(pixel_arr, palette_rgb, palette_lab, use_lab)
+    return color_nums[idx]
+
+# ------------------------------------------------------------------------------
+# Map an entire image’s pixels to the nearest palette color.
+# ------------------------------------------------------------------------------
+def find_closest_colors_image(image_array, color_key):
+    global use_lab
+    has_alpha = (image_array.shape[2] == 4)
+
+    # Separate alpha if present
+    if has_alpha:
+        rgb_data = image_array[:, :, :3]
+        alpha_channel = image_array[:, :, 3]
+    else:
+        rgb_data = image_array
+
+    palette_rgb = np.array(list(color_key.values()), dtype=np.uint8)
+
+    if use_lab:
+        # Precompute LAB for palette
+        n = palette_rgb.shape[0]
+        palette_lab = np.empty((n, 3), dtype=np.float32)
+        for i in range(n):
+            r = palette_rgb[i, 0]
+            g = palette_rgb[i, 1]
+            b = palette_rgb[i, 2]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            palette_lab[i, 0] = L
+            palette_lab[i, 1] = a_val
+            palette_lab[i, 2] = b_val
+        mapped_rgb = map_pixels_lab(rgb_data.astype(np.float32), palette_rgb.astype(np.float32), palette_lab)
+    else:
+        mapped_rgb = map_pixels_rgb(rgb_data.astype(np.float32), palette_rgb.astype(np.float32))
+
+    mapped_rgb_uint8 = np.clip(mapped_rgb, 0, 255).astype(np.uint8)
+
+    if has_alpha:
+        mapped_data = np.dstack((mapped_rgb_uint8, alpha_channel))
+    else:
+        mapped_data = mapped_rgb_uint8
+
+    return mapped_data
+
+
+def rgb_to_lab_single(rgb):
+    arr = np.uint8([[rgb]])
+    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0, 0]
+    return lab
+
+def rgb_palette_to_lab(color_key):
+    rgb_vals = np.array(list(color_key.values()), dtype=np.uint8).reshape(-1, 1, 3)
+    lab_vals = cv2.cvtColor(rgb_vals, cv2.COLOR_RGB2LAB)
+    return lab_vals.reshape(-1, 3)
+
+def build_color_key(color_key_array):
+    color_key = {}
+    for item in color_key_array:
+        color_num = item['number']
+        hex_code = item['hex'].lstrip('#')
+        rgb = tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
+        color_key[color_num] = rgb
+    return color_key
+
+# ------------------------------------------------------------------------------
+# Actual processing methods below
+# ------------------------------------------------------------------------------
 
 @register_processing_method(
     'Color Match',
@@ -1024,7 +1529,6 @@ def color_matching(img, color_key, params):
     return result_img
 
 
-
 @register_processing_method(
     'K-Means Mapping',
     default_params={'Clusters': 12},
@@ -1044,9 +1548,8 @@ def simple_k_means_palette_mapping(img, color_key, params):
 
     clusters = params['Clusters']
     if clusters == 16:
-        clusters = 24
+        clusters = 24  # special tweak
 
-    # Use threading backend with joblib to prevent CMD windows
     with parallel_backend('threading', n_jobs=1):
         kmeans = KMeans(
             n_clusters=clusters,
@@ -1055,11 +1558,10 @@ def simple_k_means_palette_mapping(img, color_key, params):
             random_state=0
         ).fit(data_flat)
 
-
     cluster_centers = kmeans.cluster_centers_
     labels = kmeans.labels_
 
-    # Map each cluster center to closest palette color individually
+    # Map cluster centers individually
     cluster_map = {}
     for i, center in enumerate(cluster_centers):
         center_rgb = tuple(center.astype(np.uint8))
@@ -1077,17 +1579,241 @@ def simple_k_means_palette_mapping(img, color_key, params):
 
     return result_img
 
+# ---------------------------------------------------------------------------
+# Numba‑jittable conversion from sRGB to CIELAB.
+# (L is scaled to [0,255] so that it’s compatible with our palette.)
+# ---------------------------------------------------------------------------
+@njit(cache=True)
+def rgb_to_lab_numba(r, g, b):
+    # Convert from [0,255] to [0,1]
+    R = r / 255.0
+    G = g / 255.0
+    B = b / 255.0
+    # Gamma correction
+    if R > 0.04045:
+        R = ((R + 0.055) / 1.055) ** 2.4
+    else:
+        R = R / 12.92
+    if G > 0.04045:
+        G = ((G + 0.055) / 1.055) ** 2.4
+    else:
+        G = G / 12.92
+    if B > 0.04045:
+        B = ((B + 0.055) / 1.055) ** 2.4
+    else:
+        B = B / 12.92
+    # Convert to XYZ using the sRGB matrix
+    X = R * 0.4124 + G * 0.3576 + B * 0.1805
+    Y = R * 0.2126 + G * 0.7152 + B * 0.0722
+    Z = R * 0.0193 + G * 0.1192 + B * 0.9505
+    # Normalize for D65 white point
+    X = X / 0.95047
+    Y = Y / 1.00000
+    Z = Z / 1.08883
+    # f(t) with threshold
+    if X > 0.008856:
+        fx = X ** (1/3)
+    else:
+        fx = 7.787 * X + 16/116.0
+    if Y > 0.008856:
+        fy = Y ** (1/3)
+    else:
+        fy = 7.787 * Y + 16/116.0
+    if Z > 0.008856:
+        fz = Z ** (1/3)
+    else:
+        fz = 7.787 * Z + 16/116.0
+    # Compute L, a, b (L normally in [0,100] is scaled to [0,255])
+    L = 116.0 * fy - 16.0
+    a_val = 500.0 * (fx - fy)
+    b_val = 200.0 * (fy - fz)
+    L = L * (255.0 / 100.0)
+    return L, a_val, b_val
 
-BAYER_8x8 = np.array([
-    [0,32,8,40,2,34,10,42],
-    [48,16,56,24,50,18,58,26],
-    [12,44,4,36,14,46,6,38],
-    [60,28,52,20,62,30,54,22],
-    [3,35,11,43,1,33,9,41],
-    [51,19,59,27,49,17,57,25],
-    [15,47,7,39,13,45,5,37],
-    [63,31,55,23,61,29,53,21]
-], dtype=np.float32) / 64.0
+# ---------------------------------------------------------------------------
+# Numba‑jitted helper: find the closest palette color for one pixel.
+# Depending on use_lab_flag, the distance is computed in LAB or RGB space.
+# ---------------------------------------------------------------------------
+@njit(cache=True)
+def find_closest_color_numba(pixel, palette_rgb, palette_lab, use_lab_flag):
+    best_index = 0
+    best_dist = 1e10
+    if use_lab_flag:
+        # Convert the pixel to LAB.
+        L, a_val, b_val = rgb_to_lab_numba(pixel[0], pixel[1], pixel[2])
+        for i in range(palette_lab.shape[0]):
+            dL = L - palette_lab[i, 0]
+            da = a_val - palette_lab[i, 1]
+            db = b_val - palette_lab[i, 2]
+            dist = dL * dL + da * da + db * db
+            if dist < best_dist:
+                best_dist = dist
+                best_index = i
+    else:
+        for i in range(palette_rgb.shape[0]):
+            dr = pixel[0] - palette_rgb[i, 0]
+            dg = pixel[1] - palette_rgb[i, 1]
+            db = pixel[2] - palette_rgb[i, 2]
+            dist = dr * dr + dg * dg + db * db
+            if dist < best_dist:
+                best_dist = dist
+                best_index = i
+    return best_index
+
+# ---------------------------------------------------------------------------
+# Numba‑jitted function to perform hybrid error diffusion.
+# Parameters:
+#   img_array      : (H x W x 3) float32 array containing RGB channels.
+#   saliency_array : (H x W) float32 array with values in [0,1].
+#   alpha_mask     : (H x W) boolean array indicating non‑transparent pixels.
+#   palette_rgb    : (N x 3) float32 palette in RGB.
+#   palette_lab    : (N x 3) float32 palette in LAB (if using LAB; otherwise empty).
+#   use_lab_flag   : boolean flag to select LAB vs. RGB for color matching.
+#   atkinson_matrix: (M1 x 3) float32 array of (dx, dy, coeff) for Atkinson.
+#   floyd_matrix   : (M2 x 3) float32 array of (dx, dy, coeff) for Floyd–Steinberg.
+#   strength       : float, multiplier for quantization error.
+# ---------------------------------------------------------------------------
+@njit(cache=True)
+def hybrid_dither_numba(img_array, saliency_array, alpha_mask, palette_rgb, palette_lab, use_lab_flag, atkinson_matrix, floyd_matrix, strength):
+    height = img_array.shape[0]
+    width = img_array.shape[1]
+    for y in range(height):
+        for x in range(width):
+            if not alpha_mask[y, x]:
+                continue
+            # Get current pixel color (RGB)
+            old_r = img_array[y, x, 0]
+            old_g = img_array[y, x, 1]
+            old_b = img_array[y, x, 2]
+            # Build a temporary 3-element array for palette matching.
+            temp = np.empty(3, dtype=np.float32)
+            temp[0] = old_r
+            temp[1] = old_g
+            temp[2] = old_b
+            # Find the index of the nearest palette color.
+            idx = find_closest_color_numba(temp, palette_rgb, palette_lab, use_lab_flag)
+            new_r = palette_rgb[idx, 0]
+            new_g = palette_rgb[idx, 1]
+            new_b = palette_rgb[idx, 2]
+            # Compute quantization error.
+            err_r = (old_r - new_r) * strength
+            err_g = (old_g - new_g) * strength
+            err_b = (old_b - new_b) * strength
+            # Assign the new (quantized) color.
+            img_array[y, x, 0] = new_r
+            img_array[y, x, 1] = new_g
+            img_array[y, x, 2] = new_b
+            # Choose diffusion matrix based on the saliency at this pixel.
+            if saliency_array[y, x] > 0.5:
+                current_matrix = floyd_matrix
+                num_neighbors = floyd_matrix.shape[0]
+            else:
+                current_matrix = atkinson_matrix
+                num_neighbors = atkinson_matrix.shape[0]
+            # Distribute the quantization error to neighboring pixels.
+            for i in range(num_neighbors):
+                dx = int(current_matrix[i, 0])
+                dy = int(current_matrix[i, 1])
+                coeff = current_matrix[i, 2]
+                nx = x + dx
+                ny = y + dy
+                if nx >= 0 and nx < width and ny >= 0 and ny < height:
+                    if alpha_mask[ny, nx]:
+                        img_array[ny, nx, 0] += err_r * coeff
+                        img_array[ny, nx, 1] += err_g * coeff
+                        img_array[ny, nx, 2] += err_b * coeff
+
+# ---------------------------------------------------------------------------
+# The public hybrid dithering function.
+#
+# This routine:
+#  1. Computes a saliency map from the image (using edge detection and blur).
+#  2. Prepares the image (and alpha mask) as a float32 NumPy array.
+#  3. Precomputes the palette (in RGB and, optionally, LAB).
+#  4. Defines the Atkinson and Floyd–Steinberg diffusion matrices.
+#  5. Calls the numba‑jitted hybrid_dither_numba function.
+#  6. Clips and converts the result back to a PIL image.
+# ---------------------------------------------------------------------------
+@register_processing_method(
+    'Hybrid Dither',
+    default_params={'strength': 1.0},
+    description="Switches between Atkinson and Floyd dithering based on texture."
+)
+def hybrid_dithering(img, color_key, params):
+    global use_lab
+    strength = params.get('strength', 0.75)
+    
+    # Generate a saliency map using edge detection and Gaussian blur.
+    gray_img = img.convert('L')
+    edges = gray_img.filter(ImageFilter.FIND_EDGES)
+    saliency_map = edges.filter(ImageFilter.GaussianBlur(1.5))
+    saliency_array = np.array(saliency_map, dtype=np.float32) / 255.0
+
+    # Prepare image and alpha mask.
+    has_alpha = (img.mode == 'RGBA')
+    # Work in float32 for smoother error propagation.
+    img_array = np.array(img, dtype=np.float32)
+    height, width = img_array.shape[:2]
+    if has_alpha:
+        alpha_channel = img_array[:, :, 3]
+        alpha_mask = (alpha_channel > 0)
+    else:
+        alpha_mask = np.ones((height, width), dtype=np.bool_)
+
+    # Precompute the palette in RGB.
+    palette_rgb = np.array(list(color_key.values()), dtype=np.float32)
+    
+    # Precompute the LAB palette if needed.
+    if use_lab:
+        n = palette_rgb.shape[0]
+        palette_lab = np.empty((n, 3), dtype=np.float32)
+        for i in range(n):
+            r = palette_rgb[i, 0]
+            g = palette_rgb[i, 1]
+            b = palette_rgb[i, 2]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            palette_lab[i, 0] = L
+            palette_lab[i, 1] = a_val
+            palette_lab[i, 2] = b_val
+    else:
+        palette_lab = np.empty((0, 3), dtype=np.float32)
+    
+    # Define diffusion matrices.
+    # Atkinson (typically diffuses to 6 neighbors)
+    atkinson = np.array([
+        [ 1,  0, 1/8],
+        [ 2,  0, 1/8],
+        [-1,  1, 1/8],
+        [ 0,  1, 1/8],
+        [ 1,  1, 1/8],
+        [ 0,  2, 1/8],
+    ], dtype=np.float32)
+    # Floyd–Steinberg (classic 4-neighbor pattern)
+    floyd = np.array([
+        [ 1,  0, 7/16],
+        [-1,  1, 3/16],
+        [ 0,  1, 5/16],
+        [ 1,  1, 1/16],
+    ], dtype=np.float32)
+    
+    # Call the numba‑accelerated hybrid dithering routine.
+    hybrid_dither_numba(img_array, saliency_array, alpha_mask,
+                        palette_rgb, palette_lab, use_lab,
+                        atkinson, floyd, strength)
+    
+    # Clip the RGB channels to [0,255] and convert to uint8.
+    img_array[:, :, :3] = np.clip(img_array[:, :, :3], 0, 255)
+    img_array = img_array.astype(np.uint8)
+    
+    # Reattach alpha channel if needed.
+    if has_alpha:
+        result_img = Image.fromarray(img_array, mode='RGBA')
+    else:
+        result_img = Image.fromarray(img_array, mode='RGB')
+    
+    return result_img
+
+
 
 @register_processing_method(
     'Pattern Dither',
@@ -1096,119 +1822,228 @@ BAYER_8x8 = np.array([
 )
 def ordered_dithering(img, color_key, params):
     global use_lab
-
-    has_alpha = img.mode == "RGBA"
-
     strength = params.get('strength', 1.0)
-
-    img_array = np.array(img, dtype=np.uint8)
-    height, width = img_array.shape[:2]
-
-    # Convert the color key to an array
-    i = 0
-    col_key = []
-    diff_key = []
-    for i, value in enumerate(color_key.values()):
-        value = np.array(value, dtype = np.uint8)
-        if use_lab:
-            diff_key.append(rgb_to_lab(*value))
-        else:
-            diff_key.append(value)
-        col_key.append(value)
-    color_key = np.array(col_key, dtype=np.uint8)
-    diff_key = np.array(diff_key, dtype=np.float64)
-
     adjustment_factor = 0.3 * strength
 
-    tiled_bayer = np.tile(BAYER_8x8, (height//8+1, width//8+1))
-    tiled_bayer = tiled_bayer[:height, :width]
+    # 8x8 Bayer matrix
+    bayer_8x8 = np.array([
+        [0, 32, 8, 40, 2, 34, 10, 42],
+        [48, 16, 56, 24, 50, 18, 58, 26],
+        [12, 44, 4, 36, 14, 46, 6, 38],
+        [60, 28, 52, 20, 62, 30, 54, 22],
+        [3, 35, 11, 43, 1, 33, 9, 41],
+        [51, 19, 59, 27, 49, 17, 57, 25],
+        [15, 47, 7, 39, 13, 45, 5, 37],
+        [63, 31, 55, 23, 61, 29, 53, 21]
+    ], dtype=np.float32) / 64.0
 
-    img_rgb = img_array[..., :3].astype(np.uint8)
-
-    if use_lab:
-        p_lab = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB).astype(np.float64)
-        p_lab[..., 0] /= 255.0
-        less = p_lab[..., 0] < tiled_bayer
-        more = p_lab[..., 0] >= tiled_bayer
-        p_lab[..., 0][less] = p_lab[..., 0][less] - adjustment_factor
-        p_lab[..., 0][more] = p_lab[..., 0][more] + adjustment_factor
-        p_lab = (p_lab * (255, 1, 1)).clip(0, 255)
-        rgb_adj = cv2.cvtColor(p_lab.astype(np.uint8), cv2.COLOR_LAB2RGB).clip(0, 255)
-    else:
-        brightness = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
-        less = brightness < tiled_bayer
-        more = brightness >= tiled_bayer
-        brightness[less] = 1 - adjustment_factor
-        brightness[more] = 1 + adjustment_factor
-        mul = np.dstack((brightness, brightness, brightness))
-        rgb_adj = np.clip(img_rgb.astype(np.float64) * mul.astype(np.float64),0,255).astype(np.uint8)
-
-    image = quantize_image(rgb_adj, color_key, True)
-
+    img = img.copy()
+    img_array = np.array(img, dtype=np.uint8)
+    has_alpha = (img.mode == 'RGBA')
     if has_alpha:
-        result_img = Image.fromarray(np.dstack((image, img_array[..., 3])), 'RGBA')
+        alpha_channel = img_array[:, :, 3]
+        alpha_mask = alpha_channel > 0
     else:
-        result_img = Image.fromarray(image, 'RGB')
+        alpha_mask = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.bool_)
+
+    height, width = img_array.shape[:2]
+
+    # Build palette
+    palette_rgb = np.array(list(color_key.values()), dtype=np.uint8)
+    if use_lab:
+        n_palette = palette_rgb.shape[0]
+        palette_lab = np.empty((n_palette, 3), dtype=np.float32)
+        for i in range(n_palette):
+            r, g, b = palette_rgb[i]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            palette_lab[i, 0] = L
+            palette_lab[i, 1] = a_val
+            palette_lab[i, 2] = b_val
+    else:
+        palette_lab = np.empty((0, 3), dtype=np.float32)
+
+    # Tile the Bayer matrix
+    tiled_bayer = np.tile(bayer_8x8, (height // 8 + 1, width // 8 + 1))
+    tiled_bayer = tiled_bayer[:height, :width].astype(np.float32)
+
+    # We'll separate into two specialized routines for clarity
+    @njit(parallel=True, cache=True)
+    def ordered_dithering_rgb(image, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb):
+        h, w = image.shape[:2]
+        n_palette = palette_rgb.shape[0]
+        for y in prange(h):
+            for x in range(w):
+                if not alpha_mask[y, x]:
+                    continue
+                r = image[y, x, 0]
+                g = image[y, x, 1]
+                b = image[y, x, 2]
+                brightness = (r + g + b) / 765.0
+                threshold = tiled_bayer[y, x]
+                if brightness < threshold:
+                    factor = 1.0 - adjustment_factor
+                else:
+                    factor = 1.0 + adjustment_factor
+
+                r_adj = max(0, min(r * factor, 255))
+                g_adj = max(0, min(g * factor, 255))
+                b_adj = max(0, min(b * factor, 255))
+
+                best_idx = 0
+                best_dist = 1e10
+                for i in range(n_palette):
+                    dr = r_adj - palette_rgb[i, 0]
+                    dg = g_adj - palette_rgb[i, 1]
+                    db = b_adj - palette_rgb[i, 2]
+                    dist = dr*dr + dg*dg + db*db
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx = i
+
+                image[y, x, 0] = palette_rgb[best_idx, 0]
+                image[y, x, 1] = palette_rgb[best_idx, 1]
+                image[y, x, 2] = palette_rgb[best_idx, 2]
+
+    @njit(parallel=True, cache=True)
+    def ordered_dithering_lab(image, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb, palette_lab):
+        h, w = image.shape[:2]
+        n_palette = palette_rgb.shape[0]
+        for y in prange(h):
+            for x in range(w):
+                if not alpha_mask[y, x]:
+                    continue
+                r = image[y, x, 0]
+                g = image[y, x, 1]
+                b = image[y, x, 2]
+                L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+                L_norm = L / 255.0
+                threshold = tiled_bayer[y, x]
+                if L_norm < threshold:
+                    L_adj = L_norm - adjustment_factor
+                    if L_adj < 0.0:
+                        L_adj = 0.0
+                else:
+                    L_adj = L_norm + adjustment_factor
+                    if L_adj > 1.0:
+                        L_adj = 1.0
+                L_new = L_adj * 255.0
+
+                best_idx = 0
+                best_dist = 1e10
+                for i in range(n_palette):
+                    dL = L_new - palette_lab[i, 0]
+                    da = a_val - palette_lab[i, 1]
+                    db = b_val - palette_lab[i, 2]
+                    dist = dL*dL + da*da + db*db
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx = i
+
+                image[y, x, 0] = palette_rgb[best_idx, 0]
+                image[y, x, 1] = palette_rgb[best_idx, 1]
+                image[y, x, 2] = palette_rgb[best_idx, 2]
+
+    proc_img = img_array.astype(np.float32)
+    if use_lab and palette_lab.shape[0] > 0:
+        ordered_dithering_lab(proc_img, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb.astype(np.float32), palette_lab)
+    else:
+        ordered_dithering_rgb(proc_img, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb.astype(np.float32))
+
+    proc_img = np.clip(proc_img, 0, 255).astype(np.uint8)
+    if has_alpha:
+        img_array[:, :, :3] = proc_img[:, :, :3]
+        result_img = Image.fromarray(img_array, 'RGBA')
+    else:
+        result_img = Image.fromarray(proc_img[:, :, :3], 'RGB')
 
     return result_img
 
 
-def convert_legacy_array(arr):
-    min_x, min_y, max_x, max_y = 100, 100, -100, -100
-    for x, y, _ in arr:
-        min_x = min(min_x, x) 
-        max_x = max(max_x, x) 
-        min_y = min(min_y, y)
-        max_y = max(max_y, y) 
-    width, height = max_x - min_x + 1, max_y - min_y + 1
-    np_arr = np.zeros((height, width))
-    for x, y, coeff in arr:
-        np_arr[y - min_y, x - min_x] = coeff
-    return np_arr, min_y, min_x
+
+@register_processing_method(
+    'Random Dither',
+    default_params={'strength': 1.0, 'smoothing': False},
+    description="Adds randomized dithering for a noisier but more natural texture."
+)
+def random_dithering(img, color_key, params):
+    global use_lab
+    strength = params.get('strength', 1.0)
+    smoothing = params.get('smoothing', False)
+    # The noise standard deviation (adjust as desired)
+    noise_std = 32 * strength
+
+    # Work on a copy of the image.
+    img = img.copy()
+    has_alpha = (img.mode == 'RGBA')
+    img_array = np.array(img, dtype=np.uint8)
+    
+    # Separate RGB and alpha (if present)
+    if has_alpha:
+        rgb_data = img_array[:, :, :3]
+        alpha_channel = img_array[:, :, 3]
+    else:
+        rgb_data = img_array
+
+    height, width = rgb_data.shape[:2]
+    
+    if use_lab:
+        # Convert the entire image to LAB using OpenCV (vectorized)
+        lab_data = cv2.cvtColor(rgb_data, cv2.COLOR_RGB2LAB)
+        # Generate noise arrays for each channel.
+        # For LAB, we use a lower noise std for the chromatic channels.
+        l_noise = np.random.normal(0, noise_std * 0.5, size=(height, width))
+        a_noise = np.random.normal(0, noise_std * 0.25, size=(height, width))
+        b_noise = np.random.normal(0, noise_std * 0.25, size=(height, width))
+        # Optionally smooth the noise to yield more natural transitions.
+        if smoothing:
+            l_noise = cv2.GaussianBlur(l_noise.astype(np.float32), (3, 3), 0)
+            a_noise = cv2.GaussianBlur(a_noise.astype(np.float32), (3, 3), 0)
+            b_noise = cv2.GaussianBlur(b_noise.astype(np.float32), (3, 3), 0)
+        # Add the noise to the LAB image (working in float32 for precision)
+        noisy_lab = lab_data.astype(np.float32)
+        noisy_lab[:, :, 0] += l_noise
+        noisy_lab[:, :, 1] += a_noise
+        noisy_lab[:, :, 2] += b_noise
+        # Clip the LAB values back into the 0-255 range and convert to uint8
+        noisy_lab = np.clip(noisy_lab, 0, 255).astype(np.uint8)
+        # Convert back to RGB using OpenCV (vectorized)
+        noisy_rgb = cv2.cvtColor(noisy_lab, cv2.COLOR_LAB2RGB)
+    else:
+        # For RGB, generate noise for each channel
+        noise = np.random.normal(0, noise_std, size=rgb_data.shape)
+        if smoothing:
+            noise = cv2.GaussianBlur(noise.astype(np.float32), (3, 3), 0)
+        # Add the noise and clip to valid range
+        noisy_rgb = rgb_data.astype(np.float32) + noise
+        noisy_rgb = np.clip(noisy_rgb, 0, 255).astype(np.uint8)
+    
+    # Use the optimized, vectorized color mapping routine to snap each pixel
+    # to its nearest palette color. (This function is assumed to be accelerated
+    # with numba or other techniques.)
+    mapped_rgb = find_closest_colors_image(noisy_rgb, color_key)
+    
+    # Reattach the alpha channel if needed.
+    if has_alpha:
+        mapped_data = np.dstack((mapped_rgb[:, :, :3], alpha_channel))
+        result_mode = 'RGBA'
+    else:
+        mapped_data = mapped_rgb
+        result_mode = 'RGB'
+    
+    return Image.fromarray(mapped_data, mode=result_mode)
 
 @register_processing_method(
     'Atkinson Dither',
     default_params={'strength': 1.0},
-    description="Dithering suited for smaller images! Used by the Macintosh to translate images for monochrome displays."
+    description="Dithering suited for smaller images! Used by the Macintosh for monochrome displays."
 )
 def atkinson_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = convert_legacy_array([
+    diffusion_matrix = [
         (1, 0, 1 / 8), (2, 0, 1 / 8),
         (-1, 1, 1 / 8), (0, 1, 1 / 8), (1, 1, 1 / 8),
         (0, 2, 1 / 8),
-    ])
-    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
-
-
-@register_processing_method(
-    'Stucki Dither',
-    default_params={'strength': 1.0},
-    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results."
-)
-def stucki_dithering(img, color_key, params):
-    strength = params.get('strength', 1.0)
-    diffusion_matrix = convert_legacy_array([
-        (1, 0, 8 / 42), (2, 0, 4 / 42),
-        (-2, 1, 2 / 42), (-1, 1, 4 / 42), (0, 1, 8 / 42), (1, 1, 4 / 42), (2, 1, 2 / 42),
-        (-2, 2, 1 / 42), (-1, 2, 2 / 42), (0, 2, 4 / 42), (1, 2, 2 / 42), (2, 2, 1 / 42),
-    ])
-    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
-
-
-@register_processing_method(
-    'Floyd Dither',
-    default_params={'strength': 1.0},
-    description="Create smooth gradients using diffusion. Best used for images with size over ~120."
-)
-def floyd_steinberg_dithering(img, color_key, params):
-    strength = params.get('strength', 1.0)
-    diffusion_matrix = convert_legacy_array([
-        (1, 0, 7 / 16),
-        (-1, 1, 3 / 16),
-        (0, 1, 5 / 16),
-        (1, 1, 1 / 16),
-    ])
+    ]
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
@@ -1219,11 +2054,42 @@ def floyd_steinberg_dithering(img, color_key, params):
 )
 def jarvis_judice_ninke_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = convert_legacy_array([
+    diffusion_matrix = [
         (1, 0, 7 / 48), (2, 0, 5 / 48),
         (-2, 1, 3 / 48), (-1, 1, 5 / 48), (0, 1, 7 / 48), (1, 1, 5 / 48), (2, 1, 3 / 48),
         (-2, 2, 1 / 48), (-1, 2, 3 / 48), (0, 2, 5 / 48), (1, 2, 3 / 48), (2, 2, 1 / 48),
-    ])
+    ]
+    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
+
+
+@register_processing_method(
+    'Stucki Dither',
+    default_params={'strength': 1.0},
+    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results."
+)
+def stucki_dithering(img, color_key, params):
+    strength = params.get('strength', 1.0)
+    diffusion_matrix = [
+        (1, 0, 8 / 42), (2, 0, 4 / 42),
+        (-2, 1, 2 / 42), (-1, 1, 4 / 42), (0, 1, 8 / 42), (1, 1, 4 / 42), (2, 1, 2 / 42),
+        (-2, 2, 1 / 42), (-1, 2, 2 / 42), (0, 2, 4 / 42), (1, 2, 2 / 42), (2, 2, 1 / 42),
+    ]
+    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
+
+
+@register_processing_method(
+    'Floyd Dither',
+    default_params={'strength': 1.0},
+    description="Create smooth gradients using diffusion. Best used for images with size over ~120."
+)
+def floyd_steinberg_dithering(img, color_key, params):
+    strength = params.get('strength', 1.0)
+    diffusion_matrix = [
+        (1, 0, 7 / 16),
+        (-1, 1, 3 / 16),
+        (0, 1, 5 / 16),
+        (1, 1, 1 / 16),
+    ]
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
@@ -1234,231 +2100,28 @@ def jarvis_judice_ninke_dithering(img, color_key, params):
 )
 def sierra2_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
-    diffusion_matrix = convert_legacy_array([
+    diffusion_matrix = [
         (1, 0, 4/16), (2, 0, 3/16),
         (-2, 1, 1/16), (-1, 1, 2/16), (0, 1, 3/16), (1, 1, 2/16), (2, 1, 1/16),
-    ])
+    ]
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
-@register_processing_method(
-    'Random Dither',
-    default_params={'strength': 1.0},
-    description="Adds randomized dithering for a noisier but more natural texture."
-)
-def random_dithering(img, color_key, params):
-    global use_lab
-
-    # Convert the color key to an array
-    i = 0
-    diff_key = np.array(list(color_key.values()), dtype=np.uint8)
-
-    strength = params.get('strength', 1.0)
-
-    has_alpha = img.mode == 'RGBA'
-    img_arr = np.array(img, dtype = np.uint8)
-    img_rgb = img_arr[..., :3]
-    if has_alpha:
-        img_a = img_arr[..., 3]
-    height, width = img_rgb.shape[:2]
-
-    noise_std = 32 * strength
-    noise = np.random.normal(0, noise_std, (height, width))
-    noise = np.dstack((noise, noise, noise))
-    if use_lab:
-        noise *= (0.5, 0.25, 0.25)
-        img_rgb = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2LAB).astype(np.float64)
-    img_rgb = img_rgb.astype(np.float64) + noise
-    img_rgb = img_rgb.clip(0, 255)
-    img_rgb = img_rgb.astype(np.uint8)
-    if use_lab:
-        img_rgb = cv2.cvtColor(img_rgb, cv2.COLOR_LAB2RGB)
-    img_rgb = quantize_image(img_rgb, diff_key, True)
-
-    img = Image.fromarray(np.dstack((img_rgb, img_a)) if has_alpha else img_rgb, "RGBA" if has_alpha else "RGB")
-
-    return img
 
 
-def build_color_key(color_key_array):
-    color_key = {}
-    for item in color_key_array:
-        color_num = item['number']
-        hex_code = item['hex'].lstrip('#')
-        rgb = tuple(int(hex_code[i:i+2], 16) for i in (0, 2, 4))
-        color_key[color_num] = rgb
-    return color_key
 
-def rgb_to_lab_single(rgb):
-    arr = np.uint8([[rgb]])
-    lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)[0,0]
-    return lab
-
-def rgb_palette_to_lab(color_key):
-    rgb_vals = np.array(list(color_key.values()), dtype=np.uint8)
-    rgb_vals_reshaped = rgb_vals.reshape(-1,1,3)
-    lab_vals = cv2.cvtColor(rgb_vals_reshaped, cv2.COLOR_RGB2LAB)
-    lab_vals = lab_vals.reshape(-1,3)
-    return lab_vals
-
-def find_closest_color(pixel, color_key):
-    global use_lab
-    pixel = np.array(pixel, dtype=np.uint8)
-
-    color_nums = list(color_key.keys())
-    color_values_rgb = np.array(list(color_key.values()), dtype=np.uint8)
-
-    if use_lab:
-        pixel_lab = rgb_to_lab_single(pixel)
-        color_values_lab = rgb_palette_to_lab(color_key)
-        diff = color_values_lab.astype(np.float32) - pixel_lab.astype(np.float32)
-        dist_sq = np.sum(diff**2, axis=1)
-        idx = np.argmin(dist_sq)
+def process_image(img, color_key, process_mode, process_params):
+    """
+    Dispatches image processing to the appropriate method based on process_mode.
+    """
+    img = img.copy()
+    if process_mode in processing_method_registry:
+        processing_function = processing_method_registry[process_mode]
+        return processing_function(img, color_key, process_params)
     else:
-        pixel_f = pixel.astype(np.float32)
-        colors_f = color_values_rgb.astype(np.float32)
-        diff = colors_f - pixel_f
-        dist_sq = np.sum(diff**2, axis=1)
-        idx = np.argmin(dist_sq)
-
-    return color_nums[idx]
-
-def find_closest_colors_image(image_array, color_key):
-    global use_lab
-
-    has_alpha = (image_array.shape[2] == 4)
-    if has_alpha:
-        rgb_data = image_array[:, :, :3]
-        alpha_channel = image_array[:, :, 3]
-    else:
-        rgb_data = image_array
-
-    H, W = rgb_data.shape[:2]
+        # Default to color matching if unknown process_mode
+        return color_matching(img, color_key, process_params)
 
 
-    color_values_rgb = np.array(list(color_key.values()), dtype=np.uint8)
-
-    if use_lab:
-        rgb_data_reshaped = rgb_data.reshape(-1, 1, 3)
-        lab_data = cv2.cvtColor(rgb_data_reshaped, cv2.COLOR_RGB2LAB)
-        lab_data = lab_data.reshape(H, W, 3)
-        color_values_lab = rgb_palette_to_lab(color_key).astype(np.float32)
-        lab_flat = lab_data.reshape(-1, 3).astype(np.float32)
-        diff = lab_flat[:, None, :] - color_values_lab[None, :, :]
-        dist_sq = np.sum(diff**2, axis=2)
-        closest_indices = np.argmin(dist_sq, axis=1)
-        mapped_flat = color_values_rgb[closest_indices]
-    else:
-        flat_rgb = rgb_data.reshape(-1, 3).astype(np.float32)
-        colors_f = color_values_rgb.astype(np.float32)
-        diff = flat_rgb[:, None, :] - colors_f[None, :, :]
-        dist_sq = np.sum(diff**2, axis=2)
-        closest_indices = np.argmin(dist_sq, axis=1)
-        mapped_flat = color_values_rgb[closest_indices]
-
-    mapped_data = mapped_flat.reshape(H, W, 3).astype(np.uint8)
-
-    if has_alpha:
-        mapped_data = np.dstack((mapped_data, alpha_channel))
-
-    return mapped_data
-
-def quantize_image(img_arr, color_key, force_no_lab = False):
-    global use_lab
-
-    # Find closest color to each pixel
-    diff_key = color_key
-    if use_lab and not force_no_lab:
-        diff_key = cv2.cvtColor(color_key[np.newaxis, :], cv2.COLOR_RGB2LAB)[0]
-        arr = img_arr[..., :3]
-        arr = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
-    else:
-        arr = img_arr[..., :3].astype(np.float64)
-    diff = np.abs(arr[..., np.newaxis] - diff_key.T[np.newaxis, np.newaxis, :]) # Get the absolute distance
-    diff = np.swapaxes(diff, 2, 3) # Swap the axes of the color channels and distances
-    dist = np.sum(diff, axis = 3) # Sum up the color channels to get total distances
-    idx_arr = np.argmin(dist, axis = 2) # Get the index of the lowest distance
-    return color_key[idx_arr] # Index the color values with the index array to get the snapped colors
-
-def optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix):
-    global use_lab
-
-    t = time.perf_counter()
-
-    width, height = img.size
-    has_alpha = img.mode == 'RGBA'
-    diffusion_matrix, ox, oy = diffusion_matrix
-    
-    img_arr = np.array(img.convert('RGBA'), dtype=np.uint8)
-    img_rgb, img_a = np.copy(img_arr[..., :3]), img_arr[..., 3]
-
-    # Convert the color key to an array
-    i = 0
-    col_key = []
-    diff_key = []
-    for i, value in enumerate(color_key.values()):
-        value = np.array(value, dtype = np.uint8)
-        if use_lab:
-            diff_key.append(rgb_to_lab(*value))
-        else:
-            diff_key.append(value)
-        col_key.append(value)
-    color_key = np.array(col_key, dtype=np.uint8)
-    diff_key = np.array(diff_key, dtype=np.float64)
-
-    jit_diffuse(img_rgb, diffusion_matrix, color_key, diff_key, strength, ox, oy, use_lab)
-    img_rgb = quantize_image(img_rgb, color_key, True)
-    im = Image.fromarray(np.dstack((img_rgb, img_a[..., np.newaxis])), "RGBA")
-    return im
-
-@numba.jit([numba.float64[:](numba.uint8, numba.uint8, numba.uint8)], nopython=True)
-def rgb_to_lab(r, g, b):
-    rgb = np.array((r, g, b), dtype=np.float64) / 255
-    rgb_to_xyz_matrix = np.array([
-        [ 0.4124564,  0.3575761,  0.1804375 ],
-        [ 0.2126729,  0.7151533,  0.0721737 ],
-        [ 0.0193339,  0.1191920,  0.9504741 ]
-    ], dtype=np.float64).T
-    xyz = rgb.astype(np.float64) @ rgb_to_xyz_matrix
-    whitepoint = np.array((0.950456, 1.0000, 1.088754), dtype=np.float64) # D65 white point
-    x, y, z = xyz / whitepoint
-    lab = np.empty((3, ), dtype=np.float64)
-    lab[0] = ((116 * (y**0.3333) - 16) if y > 0.008856 else (903.3 * y))
-    lab[0] *= 255 / 100
-    lab[1] = 500 * (((x**0.3333) if x > 0.008556 else (7.787*x + 16/116)) - (y**0.3333) if y > 0.008556 else (7.787*y + 16/116)) + 128
-    lab[2] = 200 * (((y**0.3333) if y > 0.008556 else (7.787*y + 16/116)) - (z**0.3333) if z > 0.008556 else (7.787*z + 16/116)) + 128
-    return lab
-
-@numba.jit(numba.void(numba.uint8[:, :, :], numba.float64[:, :], numba.uint8[:, :], numba.float64[:, :], numba.float64, numba.int32, numba.int32, numba.uint8), nopython=True)
-def jit_diffuse(image_arr, diffusion_matrix, color_key, diff_key, strength, ox, oy, use_lab):
-    height, width = image_arr.shape[:2]
-    diff_height, diff_width = diffusion_matrix.shape[:2]
-    for y in range(height):
-        for x in range(width):
-            col = image_arr[y, x]
-
-            # Get closest color
-            if use_lab:
-                diff_col = rgb_to_lab(col[0], col[1], col[2])
-            else:
-                diff_col = col.astype(np.float64)
-            diff = np.abs(diff_col - diff_key)
-            diff = np.sum(diff, axis = 1)
-            idx = np.argmin(diff)
-            quant = color_key[idx]
-            err = (col.astype(np.float64) - quant.astype(np.float64)) * strength
-
-            image_arr[y, x] = quant
-
-            for dy in range(diff_height):
-                for dx in range(diff_width):
-                    if diffusion_matrix[dy, dx] != 0:
-                        nx, ny = x + dx + ox, y + dy + oy
-                        if 0 <= nx < width and 0 <= ny < height:
-                            neighbor = image_arr[int(ny), int(nx)]
-                            nb = neighbor + err * diffusion_matrix[dy, dx]
-                            image_arr[int(ny), int(nx)] = nb.clip(0, 255)
-
-#Processing End
 
 
 def process_and_save_image(img, target_size, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag, progress_callback=None, message_callback=None, error_callback=None):
@@ -1492,6 +2155,11 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
                 message_callback("Image preprocessed.")
             img = Image.fromarray(img_np, 'RGBA')
 
+        global brightness
+        if brightness != 0.5:
+            img = adjust_brightness(img, brightness)
+            if message_callback:
+                message_callback("Manual Brightness Adjusted")
         # Construct color_key from color_key_array
         color_key = build_color_key(color_key_array)
         
@@ -1508,8 +2176,6 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
         img = img.copy()
         pixels = img.load()
         width, height = img.size
-        
-        # TODO: Manual looping could be accelerated with numpy
         for y in range(height):
             for x in range(width):
                 pixel = pixels[x, y]
@@ -1541,7 +2207,6 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
 
             # Process each pixel
             pixels = img.load()
-            # TODO: Manual looping could be accelerated with numpy (vectorize find_closest_color with the quantize_image function)
             for y in range(height - 1, -1, -1):  # Process from bottom to top
                 for x in range(width):
                     try:
@@ -1578,7 +2243,6 @@ def process_and_save_image(img, target_size, process_mode, use_lab_flag, process
 
     except Exception as e:
         if error_callback:
-            traceback.print_exc()
             error_callback(f"An error occurred: {e}")
 
 def save_image(img, preview_path, color_key_array):
@@ -1680,7 +2344,6 @@ def save_image(img, preview_path, color_key_array):
     output_array = np.zeros_like(img_array)
 
     # Process each pixel
-    # TODO: Manual looping could be accelerated with numpy
     for y in range(img_array.shape[0]):
         for x in range(img_array.shape[1]):
             pixel_rgb = tuple(rgb_array[y, x])  # Current pixel RGB
@@ -1862,7 +2525,6 @@ def process_and_save_gif(
                 Frame1Array = -1 * np.ones((height, width), dtype=np.int32)
                 first_frame_pixels = -1 * np.ones((height, width), dtype=np.int32)
 
-                # TODO: Manual looping could be accelerated with numpy
                 for y in range(height):
                     for x in range(width):
                         if mask[y, x]:
@@ -1897,7 +2559,6 @@ def process_and_save_gif(
                 # Initialize CurrentFrameArray
                 CurrentFrameArray = -1 * np.ones((height, width), dtype=np.int32)
 
-                # TODO: Manual looping could be accelerated with numpy
                 for y in range(height):
                     for x in range(width):
                         if mask[y, x]:
@@ -2109,6 +2770,8 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
 
         # Construct color_key from color_key_array
         color_key = build_color_key(color_key_array)
+     
+        
 
         for frame_number in range(1, total_frames + 1):  # Start frame numbering from 1
             img.seek(frame_number - 1)
@@ -2128,6 +2791,11 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
                 frame_np = preprocess_image(frame_np, color_key_array, message_callback, True)
                 frame = Image.fromarray(frame_np, 'RGBA')
 
+            global brightness
+            if brightness != 0.5:
+                frame = adjust_brightness(frame, brightness)
+                if message_callback:
+                    message_callback("Manual Brightness Adjusted")
             # Apply the processing method to the frame
             frame = process_image(frame, color_key, process_mode, process_params)
             # Handle translucent pixels by creating a writable copy
@@ -2140,7 +2808,6 @@ def save_frames(img, target_size, process_mode, use_lab_flag, process_params, re
             width, height = frame.size
             opacity_threshold = 204  # 80% opacity (255 * 0.8)
 
-            # TODO: Manual looping could be accelerated with numpy
             for y in range(height):
                 for x in range(width):
                     r, g, b, a = pixels[x, y]
@@ -2283,14 +2950,7 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
     global chalks_colors
     chalks_colors = remove_bg
     # Calculate the delta
-    delta = brightness_flag - mid_point
-
-    if brightness_flag < mid_point:
-        # Darker side (compressed sensitivity)
-        brightness = mid_point + delta * abs(delta / (mid_point - lower_bound)) ** 1.75
-    else:
-        # Lighter side (stretched sensitivity)
-        brightness = mid_point + delta * abs(delta / (upper_bound - mid_point)) ** 1.25
+    brightness = brightness_flag
     
     try:
         if message_callback:
@@ -2299,7 +2959,7 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
         # Handle 'clip' as image_path
         if image_path == 'clip':
             try:
-                img = get_clipboard_image()
+                img = ImageGrab.grabclipboard()
                 if img is None:
                     if error_callback:
                         error_callback("No image found in clipboard.")
@@ -2768,11 +3428,12 @@ class MainWindow(QMainWindow):
             "Waka waka waka",
             "This is a bucket",
             "bork meooow",
-            "The roots are growing",
             "\"shrivel\" -grandma ",
             "Gnarp gnap",
-            "im tired",
-            "all roads lead deeper into the woods"
+            "all roads lead deeper into the woods",
+            "numba based optimizations by baltdev",
+            "Would you like to sign my petition?",
+            "Guns don't kill. I do"
         ]
         self.setWindowTitle(random.choice(self.window_titles))
         self.setFixedSize(700, 768)
@@ -3227,7 +3888,7 @@ class MainWindow(QMainWindow):
         # -------------------------
         initial_layout.addWidget(background_container, alignment=Qt.AlignCenter)
 
-        self.signature_label = QLabel("By PurplePuppy")
+        self.signature_label = QLabel("By PurplePuppy & baltdev")
 
         self.signature_label.setStyleSheet("""
             color: #A45EE5;
@@ -4786,7 +5447,7 @@ class MainWindow(QMainWindow):
 
             # Resize (max dim)
             resize_layout = QHBoxLayout()
-            resize_layout.setSpacing(20)
+            resize_layout.setSpacing(10)
             resize_label = QLabel("Resize (max dim):")
             resize_label.setAlignment(Qt.AlignTop)
             resize_layout.addWidget(resize_label, alignment=Qt.AlignTop)
@@ -4814,15 +5475,15 @@ class MainWindow(QMainWindow):
             method_options_widget.setLayout(method_options_widget_layout)
 
             brightness_layout = QHBoxLayout()
-            brightness_layout.setSpacing(20)
+            brightness_layout.setSpacing(10)
 
             self.brightness_label = QLabel("Brightness:")
             self.brightness_label.setAlignment(Qt.AlignTop)
             brightness_layout.addWidget(self.brightness_label, alignment=Qt.AlignTop)
 
             self.brightness_slider = QSlider(Qt.Horizontal)
-            self.brightness_slider.setRange(-53, 153)
-            self.brightness_slider.setValue(76)
+            self.brightness_slider.setRange(30, 80)
+            self.brightness_slider.setValue(55)
             self.brightness_slider.setTickInterval(1)
             brightness_layout.addWidget(self.brightness_slider, alignment=Qt.AlignTop)
 
@@ -5516,25 +6177,39 @@ class MainWindow(QMainWindow):
                 
     def resize_slider_changed(self, value):
         self.resize_value_label.setText(str(value))
-        if not self.manual_change and not self.is_gif:
-            if value > 200:
-                if "Hybrid Dither" in [method["name"] for method in self.processing_methods]:
-                    self.processing_combobox.blockSignals(True)  # Block signals
-                    self.processing_combobox.setCurrentText("Hybrid Dither")
-                    self.processing_combobox.blockSignals(False)  # Unblock signals
-                    self.processing_method_changed("Hybrid Dither", strength=False, manual=False)
-            elif value > 64:
-                if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
-                    self.processing_combobox.blockSignals(True)
-                    self.processing_combobox.setCurrentText("Pattern Dither")
-                    self.processing_combobox.blockSignals(False)
-                    self.processing_method_changed("Pattern Dither", strength=False, manual=False)
+        if not self.manual_change:
+            if not self.is_gif:
+                if value > 200:
+                    if "Hybrid Dither" in [method["name"] for method in self.processing_methods]:
+                        self.processing_combobox.blockSignals(True)  # Block signals
+                        self.processing_combobox.setCurrentText("Hybrid Dither")
+                        self.processing_combobox.blockSignals(False)  # Unblock signals
+                        self.processing_method_changed("Hybrid Dither", strength=False, manual=False)
+                elif value > 64:
+                    if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
+                        self.processing_combobox.blockSignals(True)
+                        self.processing_combobox.setCurrentText("Pattern Dither")
+                        self.processing_combobox.blockSignals(False)
+                        self.processing_method_changed("Pattern Dither", strength=False, manual=False)
+                else:
+                    if "Color Match" in [method["name"] for method in self.processing_methods]:
+                        self.processing_combobox.blockSignals(True)
+                        self.processing_combobox.setCurrentText("Color Match")
+                        self.processing_combobox.blockSignals(False)
+                        self.processing_method_changed("Color Match", strength=False, manual=False)
             else:
-                if "Color Match" in [method["name"] for method in self.processing_methods]:
-                    self.processing_combobox.blockSignals(True)
-                    self.processing_combobox.setCurrentText("Color Match")
-                    self.processing_combobox.blockSignals(False)
-                    self.processing_method_changed("Color Match", strength=False, manual=False)
+                if value > 80:
+                    if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
+                        self.processing_combobox.blockSignals(True)
+                        self.processing_combobox.setCurrentText("Pattern Dither")
+                        self.processing_combobox.blockSignals(False)
+                        self.processing_method_changed("Pattern Dither", strength=False, manual=False)
+                else:
+                    if "Color Match" in [method["name"] for method in self.processing_methods]:
+                        self.processing_combobox.blockSignals(True)
+                        self.processing_combobox.setCurrentText("Color Match")
+                        self.processing_combobox.blockSignals(False)
+                        self.processing_method_changed("Color Match", strength=False, manual=False)
 
 
 
@@ -5844,8 +6519,8 @@ class MainWindow(QMainWindow):
             self.brightness_label.setVisible(True)
             self.brightness_slider.setVisible(True)
         else:
-            self.brightness_label.setVisible(False)
-            self.brightness_slider.setVisible(False)
+            self.brightness_label.setVisible(True)
+            self.brightness_slider.setVisible(True)
 
     def toggle_boost_elements(self, checked):
         """
@@ -5856,8 +6531,8 @@ class MainWindow(QMainWindow):
             self.brightness_label.setVisible(True)
             self.brightness_slider.setVisible(True)
         else:
-            self.brightness_label.setVisible(False)
-            self.brightness_slider.setVisible(False)
+            self.brightness_label.setVisible(True)
+            self.brightness_slider.setVisible(True)
 
         for color_number in self.boost_labels:
             if checked and self.color_checkboxes[color_number].isChecked():  
@@ -6123,8 +6798,8 @@ class MainWindow(QMainWindow):
             self.brightness_label.setVisible(True)
             self.brightness_slider.setVisible(True)
         else:
-            self.brightness_label.setVisible(False)
-            self.brightness_slider.setVisible(False)
+            self.brightness_label.setVisible(True)
+            self.brightness_slider.setVisible(True)
 
         for color_number in self.boost_labels:
                 self.boost_labels[color_number].setVisible(False)
@@ -6132,7 +6807,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
 
-        self.brightness_slider.setValue(76)
+        self.brightness_slider.setValue(55)
         self.manual_change = False
         self.resize_slider_changed(self.resize_slider.value())
 
@@ -6147,7 +6822,7 @@ class MainWindow(QMainWindow):
                     self.threshold_sliders[color_number].setValue(20)
 
                 
-                self.brightness_slider.setValue(76)
+                self.brightness_slider.setValue(55)
 
 
             else:
@@ -6160,7 +6835,7 @@ class MainWindow(QMainWindow):
                 if color_number in self.threshold_sliders:
                     self.threshold_sliders[color_number].setValue(28)
                 
-                self.brightness_slider.setValue(30)
+                self.brightness_slider.setValue(55)
 
 
 
@@ -6281,11 +6956,11 @@ class MainWindow(QMainWindow):
 
                 max_dimension = max(image_width, image_height)  # Use the larger dimension
 
-                if max_dimension > 200:
-                    self.resize_slider.setMaximum(200)
+                if max_dimension > 160:
+                    self.resize_slider.setMaximum(160)
                     self.resize_slider.setValue(96)
                 else:
-                    self.resize_slider.setMaximum(200)
+                    self.resize_slider.setMaximum(160)
                     self.resize_slider.setValue(max_dimension)
                     self.resize_slider_changed(max_dimension)
 
@@ -6399,7 +7074,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
 
-            self.brightness_slider.setValue(76)
+            self.brightness_slider.setValue(55)
 
             self.manual_change = False
             self.resize_slider_changed(self.resize_slider.value())
