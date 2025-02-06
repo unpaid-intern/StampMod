@@ -40,7 +40,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%localappdata%/webfishing_stamps_mod` on Windows
 - **DONT** move when placing gifs down
 - Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
-- I recommend installing the **Calico mod** and the **Borderless Fix mod**!
+- I recommend installing the **Calico mod**!
 - Please dont use Thunderstore Mod Manager, I suggest Gale or r2modman
 
 # Image Processing Guide

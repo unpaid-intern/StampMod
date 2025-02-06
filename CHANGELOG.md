@@ -68,6 +68,12 @@ got ctrl z to function and changed keybinds
 - default keybind will now be z
 # 2.2.6
 - fixed error with vertical right facing images utilizing 2 canvases ugh
+# 2.2.7
+- optimizations with numba courtesy baltdev
+- yet again better preprocessing
+- brightness adjustments now work as intended
+- more bugs
+- fixed dock canvas placement bug
 # future updates will be slow and may not happen at all, but could include:
 - longer multiframe support
 - mp4 support

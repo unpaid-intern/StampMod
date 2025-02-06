@@ -475,6 +475,9 @@ func check_image_resolution(file_path, pos):
 				ogaboga = true
 			else:
 				if Input.is_key_pressed(KEY_CONTROL):
+					if shoulddel:
+						_delete(true)
+						yield (get_tree().create_timer(0.6), "timeout")
 					pos = Vector3(154 + (imgy / 2), - 0.3, 1.4)
 					dir = "left"
 					PlayerData._send_notification("Spawning at dock!", 0)
