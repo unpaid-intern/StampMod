@@ -78,24 +78,24 @@ def get_config_path() -> Path:
     Returns:
         Path: The full path to the configuration file.
     """
-    # Start with the base path of the executable or script
+
     base_path = get_base_path()
 
-    # Navigate up until we reach 'GDWeave'
-    while base_path.name in ["mods", "PurplePuppy-Stamps_Linux"]:
+
+    while base_path.name in ["mods", "PurplePuppy-Stamps_Linux"]: #the only difference between linux ver and reg ver
         base_path = base_path.parent
 
-    # Ensure the resolved base path is correct
+
     if base_path.name != "GDWeave":
         raise ValueError(f"Base path resolution error: {base_path} is not GDWeave.")
 
-    # Navigate to the sibling 'configs' directory
+
     config_dir = (base_path / "configs").resolve()
 
-    # Ensure the configs directory exists
+
     config_dir.mkdir(parents=True, exist_ok=True)
 
-    # Define the specific configuration file name
+
     config_file = config_dir / "PurplePuppy.Stamps.json"
 
     return config_file
