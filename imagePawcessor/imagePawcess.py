@@ -1056,6 +1056,7 @@ def crop_to_solid_area(image: Image.Image) -> Image.Image:
 def resize_image(img, target_size):
     """
     Resizes the image to the target size while maintaining aspect ratio.
+    Uses nearest neighbor for upscaling and LANCZOS for downscaling.
     Handles the alpha channel separately to prevent artifacting.
     """
     try:
@@ -1063,24 +1064,30 @@ def resize_image(img, target_size):
         scale_factor = target_size / float(max(width, height))
         new_width = max(1, int(width * scale_factor))
         new_height = max(1, int(height * scale_factor))
+        
+        # Choose the resampling method based on the scaling factor.
+        # Use NEAREST for upscaling (scale_factor > 1) to avoid introducing new artifacts,
+        # and LANCZOS for downscaling.
+        resample_method = Image.NEAREST if scale_factor > 1 else Image.LANCZOS
 
-        # Separate the alpha channel
+        # Separate the alpha channel if present.
         if img.mode == 'RGBA':
             img_no_alpha = img.convert('RGB')
             alpha = img.getchannel('A')
 
-            # Resize RGB and alpha channels separately
-            img_no_alpha = img_no_alpha.resize((new_width, new_height), resample=Image.LANCZOS)
-            alpha = alpha.resize((new_width, new_height), resample=Image.LANCZOS)
+            # Resize RGB and alpha channels separately with the chosen resample method.
+            img_no_alpha = img_no_alpha.resize((new_width, new_height), resample=resample_method)
+            alpha = alpha.resize((new_width, new_height), resample=resample_method)
 
-            # Merge back together
+            # Merge the resized channels back together.
             img = Image.merge('RGBA', (*img_no_alpha.split(), alpha))
         else:
-            img = img.resize((new_width, new_height), resample=Image.LANCZOS)
+            img = img.resize((new_width, new_height), resample=resample_method)
 
         return img
     except Exception as e:
         raise RuntimeError(f"Failed to resize the image: {e}")
+
 
 
 def adjust_brightness(image, brightness):
@@ -2644,6 +2651,323 @@ def process_and_save_gif(
 
 
 
+def process_and_save_video(
+    video_path,
+    target_size,
+    process_mode,
+    use_lab_flag,
+    process_params,
+    color_key_array,
+    remove_bg,
+    preprocess_flag,
+    progress_callback=None,
+    message_callback=None,
+    error_callback=None
+):
+    """
+    Processes and saves an MP4 video into 'stamp.txt' and 'frames.txt' exactly the same way
+    as GIF frames, but at a maximum of 8 FPS (discarding frames beyond 8 FPS to preserve 
+    overall playback speed).
+
+    Args:
+        video_path (str): Path to the input video (mp4).
+        target_size (tuple): Target size for the frames (width, height).
+        process_mode (str): Processing mode.
+        use_lab_flag (bool): Flag to use LAB color space.
+        process_params (dict): Additional processing parameters.
+        color_key_array (list): List of color key dictionaries with 'number' and 'hex' keys.
+        remove_bg (bool): Flag to remove background.
+        preprocess_flag (bool): Flag to preprocess the frames.
+        progress_callback (function, optional): Callback for progress updates.
+        message_callback (function, optional): Callback for messages.
+        error_callback (function, optional): Callback for errors.
+    """
+    try:
+        # ---------------------------------------------------------------------
+        # 1) Setup: Prepare environment, files, etc.
+        # ---------------------------------------------------------------------
+        set_gif_ready_false()
+
+        current_dir = exe_path_fs('game_data/current_stamp_data')
+        os.makedirs(current_dir, exist_ok=True)
+
+        frames_txt_path = os.path.join(current_dir, 'frames.txt')
+        # Clear frames.txt
+        with open(frames_txt_path, 'w'):
+            pass
+
+        # Clear and prepare 'Frames' directory
+        frames_dir = exe_path_fs('game_data/frames')
+        if os.path.exists(frames_dir):
+            shutil.rmtree(frames_dir)
+        os.makedirs(frames_dir, exist_ok=True)
+
+        # Create and clear 'preview' folder
+        preview_folder = create_and_clear_preview_folder(message_callback)
+
+        # ---------------------------------------------------------------------
+        # Build the color key from the provided array (fix for "color key is not defined")
+        # ---------------------------------------------------------------------
+        color_key = build_color_key(color_key_array)
+
+        # ---------------------------------------------------------------------
+        # 2) Open the video with OpenCV, determine FPS, and set up skipping
+        # ---------------------------------------------------------------------
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"Failed to open video file: {video_path}")
+
+        original_fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames_in_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if original_fps <= 0:
+            # Fallback in case OpenCV fails to read FPS properly
+            original_fps = 30.0
+
+        # We will capture at most 8 FPS, preserving the total duration:
+        final_fps = min(original_fps, 8)
+        # Skip factor (approx.) to drop frames if above 8 FPS
+        skip_factor = round(original_fps / final_fps) if final_fps > 0 else 1
+
+        # For simpler logic, we treat the final delay as uniform (in milliseconds).
+        # Example: at 8 FPS, the delay is 125ms per frame; at 5 FPS, 200ms, etc.
+        final_delay_ms = int(round(1000.0 / final_fps))
+
+        if message_callback:
+            message_callback(f"Original video FPS: {original_fps:.2f}")
+            message_callback(f"Final FPS (capped at 8): {final_fps:.2f}")
+            message_callback(f"Skip factor: {skip_factor} (frames are discarded accordingly).")
+
+        # ---------------------------------------------------------------------
+        # 3) Extract frames, resize/process, and save them as PNG
+        # ---------------------------------------------------------------------
+        kept_frames_paths = []
+        frame_index = 0
+        kept_count = 0
+
+        while True:
+            ret, frame_bgr = cap.read()
+            if not ret:
+                break
+
+            # Decide whether we keep this frame (based on skip_factor)
+            if frame_index % skip_factor == 0:
+                kept_count += 1
+                # Convert BGR to RGB and create a Pillow image
+                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                pil_img = Image.fromarray(frame_rgb)
+
+                # Make a writable copy of the image
+                frame = pil_img.copy()
+
+                # Prepare the image (convert to RGBA if needed)
+                frame = prepare_image(frame)
+
+                # Resize the image if needed
+                if target_size is not None:
+                    frame = resize_image(frame, target_size)
+
+                # Preprocess the image if needed
+                if preprocess_flag:
+                    frame_np = np.array(frame)
+                    frame_np = preprocess_image(frame_np, color_key_array, message_callback, True)
+                    frame = Image.fromarray(frame_np, 'RGBA')
+
+                global brightness
+                if brightness != 0.5:
+                    frame = adjust_brightness(frame, brightness)
+                    if message_callback:
+                        message_callback("Manual Brightness Adjusted")
+
+                # Apply the processing method to the frame using the built color key
+                frame = process_image(frame, color_key, process_mode, process_params)
+
+                # Ensure the image is in RGBA mode and is writable
+                if frame.mode != 'RGBA':
+                    frame = frame.convert('RGBA')
+                else:
+                    frame = frame.copy()
+
+                # Process translucent pixels: any pixel below 80% opacity is made fully transparent
+                pixels = frame.load()
+                width, height = frame.size
+                opacity_threshold = 204  # 80% of 255
+                for y in range(height):
+                    for x in range(width):
+                        r, g, b, a = pixels[x, y]
+                        if a < opacity_threshold:
+                            pixels[x, y] = (0, 0, 0, 0)
+
+                # Save frame as PNG
+                frame_filename = f"frame_{kept_count}.png"
+                frame_path = os.path.join(frames_dir, frame_filename)
+                frame.save(frame_path)
+                kept_frames_paths.append(frame_path)
+
+                # Progress callback
+                if progress_callback:
+                    progress = (frame_index / total_frames_in_video) * 100
+                    progress_callback(progress)
+
+            frame_index += 1
+            if frame_index >= total_frames_in_video:
+                break
+
+        cap.release()  # Close the video file
+
+        total_kept_frames = len(kept_frames_paths)
+        if total_kept_frames == 0:
+            raise ValueError("No frames were extracted. Check if the video is valid and skip factor wasn't too large.")
+
+        if message_callback:
+            message_callback(f"Total frames in video: {total_frames_in_video}")
+            message_callback(f"Frames kept for final processing: {total_kept_frames}")
+
+        # ---------------------------------------------------------------------
+        # 4) Generate uniform delays array
+        # ---------------------------------------------------------------------
+        delays = [final_delay_ms] * total_kept_frames
+        uniform_delay = delays[0]  # Uniform delay for all frames
+
+        # ---------------------------------------------------------------------
+        # 5) Prepare 'stamp.txt' by analyzing the first kept frame
+        # ---------------------------------------------------------------------
+        first_frame_path = kept_frames_paths[0]
+        if not os.path.exists(first_frame_path):
+            raise FileNotFoundError(f"First frame not found at {first_frame_path}")
+
+        # Convert color_key_array to NumPy arrays for fast color matching
+        color_key_rgb = np.array([hex_to_rgb(color['hex']) for color in color_key_array], dtype=np.float32)
+        color_key_numbers = np.array([color['number'] for color in color_key_array], dtype=np.int32)
+
+        stamp_txt_path = os.path.join(current_dir, 'stamp.txt')
+        with open(stamp_txt_path, 'w') as stamp_file:
+            with Image.open(first_frame_path) as first_frame:
+                width, height = first_frame.size
+                # Scale dimensions by 0.1
+                scaled_width = round(width * 0.1, 1)
+                scaled_height = round(height * 0.1, 1)
+
+                # Write header: scaled_width, scaled_height, "gif", total_frames, uniform_delay
+                stamp_file.write(f"{scaled_width},{scaled_height},gif,{total_kept_frames},{uniform_delay}\n")
+                if message_callback:
+                    message_callback(f"Header => {scaled_width},{scaled_height},gif,{total_kept_frames},{uniform_delay}")
+
+                # Convert to RGBA and extract pixel data
+                frame_array = np.array(first_frame.convert('RGBA'))
+                alpha_channel = frame_array[:, :, 3]
+                mask = alpha_channel > 191  # Opaque pixel threshold
+                rgb_array = frame_array[:, :, :3].astype(np.float32)
+
+                # Prepare arrays to track the reference and store original values
+                Frame1Array = -1 * np.ones((height, width), dtype=np.int32)
+                first_frame_pixels = -1 * np.ones((height, width), dtype=np.int32)
+
+                for y in range(height):
+                    for x in range(width):
+                        if mask[y, x]:
+                            pixel = rgb_array[y, x]
+                            color_num = find_closest_color2(pixel, color_key_rgb, color_key_numbers)
+                            Frame1Array[y, x] = color_num
+                            first_frame_pixels[y, x] = color_num
+
+                            # Write scaled pixel coordinates and color number
+                            scaled_x = round(x * 0.1, 1)
+                            scaled_y = round(y * 0.1, 1)
+                            stamp_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
+
+        # ---------------------------------------------------------------------
+        # 6) Build 'frames.txt' by comparing each subsequent frame to the reference
+        # ---------------------------------------------------------------------
+        header_frame_number = 1  # Frame header counter
+
+        for idx in range(1, total_kept_frames):
+            current_path = kept_frames_paths[idx]
+            with Image.open(current_path) as frame:
+                frame_array = np.array(frame.convert('RGBA'))
+                alpha_channel = frame_array[:, :, 3]
+                mask = alpha_channel > 191
+                rgb_array = frame_array[:, :, :3].astype(np.float32)
+
+                CurrentFrameArray = -1 * np.ones((height, width), dtype=np.int32)
+                for y in range(height):
+                    for x in range(width):
+                        if mask[y, x]:
+                            pixel = rgb_array[y, x]
+                            color_num = find_closest_color2(pixel, color_key_rgb, color_key_numbers)
+                            CurrentFrameArray[y, x] = color_num
+
+                # Identify differences between current frame and reference
+                diffs = np.argwhere(CurrentFrameArray != Frame1Array)
+
+                with open(frames_txt_path, 'a') as frames_file:
+                    # Write frame header; if uniform_delay were variable, we could include it here
+                    if uniform_delay == -1:
+                        frame_delay = delays[idx]
+                        frames_file.write(f"frame,{header_frame_number},{frame_delay}\n")
+                    else:
+                        frames_file.write(f"frame,{header_frame_number}\n")
+
+                    for (dy, dx) in diffs:
+                        color_num = CurrentFrameArray[dy, dx]
+                        scaled_x = round(dx * 0.1, 1)
+                        scaled_y = round(dy * 0.1, 1)
+                        frames_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
+
+                # Update the reference frame for the next comparison
+                Frame1Array = CurrentFrameArray.copy()
+
+                if progress_callback:
+                    progress = (idx / total_kept_frames) * 100
+                    progress_callback(progress)
+
+                header_frame_number += 1
+
+        # ---------------------------------------------------------------------
+        # 7) Compare final frame to the first frame to "close the loop"
+        # ---------------------------------------------------------------------
+        diffs = np.argwhere(Frame1Array != first_frame_pixels)
+        with open(frames_txt_path, 'a') as frames_file:
+            final_frame_number = header_frame_number
+            if uniform_delay == -1:
+                frame_delay = delays[0]
+                frames_file.write(f"frame,{final_frame_number},{frame_delay}\n")
+            else:
+                frames_file.write(f"frame,{final_frame_number}\n")
+
+            for (dy, dx) in diffs:
+                color_num = first_frame_pixels[dy, dx]
+                scaled_x = round(dx * 0.1, 1)
+                scaled_y = round(dy * 0.1, 1)
+                frames_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
+
+        if message_callback:
+            message_callback(f"Video frames processed! Data saved to: {frames_txt_path}")
+
+        # ---------------------------------------------------------------------
+        # 8) Create a preview GIF from the extracted frames (optional)
+        # ---------------------------------------------------------------------
+        create_preview_gif(
+            total_kept_frames,
+            delays,
+            preview_folder,
+            color_key_array,
+            progress_callback,
+            message_callback,
+            error_callback
+        )
+
+        set_gif_ready_true()
+        if message_callback:
+            message_callback("Video processing finished successfully.")
+
+    except Exception as e:
+        error_message = f"An error occurred in process_and_save_video: {e}"
+        print(error_message)
+        import traceback
+        traceback.print_exc()
+        if error_callback:
+            error_callback(error_message)
 
 
 
@@ -2939,9 +3263,11 @@ def create_and_clear_preview_folder(message_callback=None):
                 message_callback(f'Failed to delete {file_path}. Reason: {e}')
     return preview_folder
 
+
+
 def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, resize_dim, color_key_array, process_mode, process_params, progress_callback=None, message_callback=None, error_callback=None):
     """
-    Main function to process the image or GIF based on the provided parameters.
+    Main function to process the image, animated GIF, or video based on the provided parameters.
     """
     global use_lab
     use_lab = use_lab_flag
@@ -2951,7 +3277,7 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
     upper_bound = 1.53
     global chalks_colors
     chalks_colors = remove_bg
-    # Calculate the delta
+    # Calculate the brightness delta
     brightness = brightness_flag
     
     try:
@@ -2994,18 +3320,27 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
                     error_callback(f"Error accessing clipboard: {e}")
                 return
         else:
-            try:
-                img = Image.open(image_path)
-            except FileNotFoundError:
-                if error_callback:
-                    error_callback(f"File not found: {image_path}")
+            # Check if the file is a video (based on extension)
+            if str(image_path).lower().endswith('.mp4'):
+                if message_callback:
+                    message_callback("Processing video...")
+                process_and_save_video(image_path, resize_dim, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag, progress_callback, message_callback, error_callback)
+                if message_callback:
+                    message_callback("Processing complete!")
                 return
-            except UnidentifiedImageError:
-                if error_callback:
-                    error_callback(f"The file '{image_path}' is not a valid image.")
-                return
+            else:
+                try:
+                    img = Image.open(image_path)
+                except FileNotFoundError:
+                    if error_callback:
+                        error_callback(f"File not found: {image_path}")
+                    return
+                except UnidentifiedImageError:
+                    if error_callback:
+                        error_callback(f"The file '{image_path}' is not a valid image.")
+                    return
 
-        # Check if image is animated
+        # Check if image is animated (e.g., a GIF or WebP)
         is_multiframe = getattr(img, "is_animated", False)
 
         if is_multiframe:
@@ -3028,6 +3363,8 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
     except Exception as e:
         if error_callback:
             error_callback(str(e))
+
+
 
 class WorkerSignals(QObject):
     progress = Signal(float)  # For progress percentage
@@ -6663,15 +7000,16 @@ class MainWindow(QMainWindow):
         )
 
 
-    def open_image_from_files(self):# Clear any previous states
-        # Open file dialog
+    def open_image_from_files(self):
+        # Clear any previous states
         if not hasattr(self, 'secondary_widget'):
             self.setup_secondary_menu()
         if self.processing:
             return
         self.reset_to_initial_state()     
         file_dialog = QFileDialog(self)
-        file_dialog.setNameFilters(["Images (*.png *.jpg *.jpeg *.bmp *.gif *.webp)"])
+        # Allow both images and MP4 videos to be picked.
+        file_dialog.setNameFilters(["Images and Videos (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.mp4)"])
         if file_dialog.exec():
             file_path = file_dialog.selectedFiles()[0]
             self.image_path = file_path
@@ -6679,7 +7017,7 @@ class MainWindow(QMainWindow):
 
             if not hasattr(self, 'secondary_widget'):
                 self.setup_secondary_menu()
-                
+                    
             self.stacked_widget.setCurrentWidget(self.secondary_widget)
 
     def open_image_from_menu(self, path):
@@ -6940,111 +7278,92 @@ class MainWindow(QMainWindow):
         # Ensure the label is deleted after the animations are done
         fade_animation.finished.connect(label.deleteLater)
 
-
     def load_image(self, file_path):
         """
-        Loads an image file, properly handling static and animated formats (GIF, WebP).
+        Loads an image file or video file. For static images and animated images (GIF, WebP),
+        the existing logic is used. If the file is an MP4 video, the new display_video function
+        is called to create and show a preview GIF.
         """     
         try:
-            # Open the image with PIL
-            img = Image.open(file_path)
-            is_animated = getattr(img, "is_animated", False)
-
-            if is_animated:
-                # Handle animated content
+            # If the file is a video (e.g. MP4), process it with display_video.
+            isvideo = False
+            # Convert file_path to string for safe lower() comparison.
+            if str(file_path).lower().endswith('.mp4'):
                 self.is_gif = True
+                isvideo = True
                 self.image_path = file_path
-
-                image_width, image_height = img.size
-
-                max_dimension = max(image_width, image_height)  # Use the larger dimension
-
-                if max_dimension > 160:
-                    self.resize_slider.setMaximum(160)
-                    self.resize_slider.setValue(96)
-                else:
-                    self.resize_slider.setMaximum(160)
-                    self.resize_slider.setValue(max_dimension)
-                    self.resize_slider_changed(max_dimension)
-
-                self.display_gif(file_path)
-
-
+                # Optionally, adjust any UI elements or sliders for video here.
+                self.display_video(file_path)
+                self.resize_slider.setMaximum(160)
+                self.resize_slider.setValue(96)
             else:
-                img = img.convert("RGBA")  # Ensure RGBA, if needed
-                width, height = img.size
-                largest_dim = max(width, height)
-                smallest_dim = min(width, height)
-                
-                # -- 1) Check special cases ------------------------------------------
-                
-                # If it's a square
-                if width == height:
-                    max_dim = 200
-                    
-                # If one dimension is exactly twice the other
-                elif (width == 2 * height) or (height == 2 * width):
-                    max_dim = 400
-                    
+                # Otherwise, open with PIL.
+                img = Image.open(file_path)
+                is_animated = getattr(img, "is_animated", False)
+
+                if is_animated:
+                    # Handle animated content (GIF or WebP)
+                    self.is_gif = True
+                    self.image_path = file_path
+
+                    image_width, image_height = img.size
+                    max_dimension = max(image_width, image_height)  # Use the larger dimension
+
+                    if max_dimension > 160:
+                        self.resize_slider.setMaximum(160)
+                        self.resize_slider.setValue(96)
+                    else:
+                        self.resize_slider.setMaximum(160)
+                        self.resize_slider.setValue(max_dimension)
+                        self.resize_slider_changed(max_dimension)
+
+                    self.display_gif(file_path)
+
                 else:
-                    # -- 2) Otherwise, do bounding-box logic for 400x200 vs 200x400 --
-                    
-                    # Scale factor for fitting into 400 wide x 200 tall
-                    # (if the image is larger, we scale down; if smaller, you can decide
-                    #  whether you want to allow scaling up or clamp to 1.0)
-                    scale_factor_a = min(400 / width, 200 / height)
-                    
-                    # Scale factor for fitting into 200 wide x 400 tall
-                    scale_factor_b = min(200 / width, 400 / height)
-                    
-                    # Pick whichever orientation yields a bigger scaled dimension
-                    best_scale_factor = max(scale_factor_a, scale_factor_b)
-                    
-                    scaled_max_dimension = best_scale_factor * largest_dim
-                    
-                    # Convert to integer (round or floor, as you prefer)
-                    max_dim = int(round(scaled_max_dimension))
-                    
-                    # The absolute max allowed is 400
-                    if max_dim > 400:
+                    # For static images
+                    img = img.convert("RGBA")  # Ensure RGBA, if needed
+                    width, height = img.size
+                    largest_dim = max(width, height)
+                    smallest_dim = min(width, height)
+                        
+                    # -- 1) Check special cases ------------------------------------------
+                    if width == height:
+                        max_dim = 200
+                    elif (width == 2 * height) or (height == 2 * width):
                         max_dim = 400
+                    else:
+                        scale_factor_a = min(400 / width, 200 / height)
+                        scale_factor_b = min(200 / width, 400 / height)
+                        best_scale_factor = max(scale_factor_a, scale_factor_b)
+                        scaled_max_dimension = best_scale_factor * largest_dim
+                        max_dim = int(round(scaled_max_dimension))
+                        if max_dim > 400:
+                            max_dim = 400
+                        
+                    self.resize_slider.setMaximum(max_dim)  # max_dim is already ≤ 400
+                        
+                    if largest_dim > max_dim:
+                        self.resize_slider.setValue(128)
+                    else:
+                        self.resize_slider.setValue(largest_dim)
+                        
+                    self.resize_slider_changed(self.resize_slider.value())
+                    self.image = ImageQt.ImageQt(img)
+                    self.display_image()
                 
-                # -- 3) Set slider maximum up to 400 ----------------------------------
-                self.resize_slider.setMaximum(max_dim)  # max_dim is already ≤ 400
-                
-                # -- 4) Decide what the slider "current value" should be -------------
-                if largest_dim > max_dim:
-                    self.resize_slider.setValue(128)
-                else:
-                    self.resize_slider.setValue(largest_dim)
-                
-                # If you have a method to apply the slider change:
-                self.resize_slider_changed(self.resize_slider.value())
-
-                self.image = ImageQt.ImageQt(img)
-                self.display_image()
-            
+            # (The rest of your UI settings for checkboxes, sliders, etc. remain unchanged.)
             for color_number in self.color_checkboxes.keys():
-                # Enable all colors
                 self.color_checkboxes[color_number].setChecked(True)
-
-                # Disable RGB and Blank checkboxes
                 self.rgb_checkboxes[color_number].setChecked(False)
                 self.rgb_checkboxes[color_number].setVisible(True)
                 self.blank_checkboxes[color_number].setChecked(False)
-                self.blank_checkboxes[color_number].setVisible(True)  
-
-                # Reset Boost sliders to 1.2 (value 12)
+                self.blank_checkboxes[color_number].setVisible(True)
                 if color_number in self.boost_sliders:
                     self.boost_sliders[color_number].setValue(14)
                     self.boost_sliders[color_number].setVisible(True)
-
-                # Reset Threshold sliders to 20
                 if color_number in self.threshold_sliders:
                     self.threshold_sliders[color_number].setValue(20)
-                    self.threshold_sliders[color_number].setVisible(True) 
-
-                # Hide Boost and Threshold labels
+                    self.threshold_sliders[color_number].setVisible(True)
                 if color_number in self.boost_labels:
                     self.boost_labels[color_number].setVisible(True)
                 if color_number in self.threshold_labels:
@@ -7065,7 +7384,6 @@ class MainWindow(QMainWindow):
                 if "Color Match" in [method["name"] for method in self.processing_methods]:
                     self.processing_combobox.setCurrentText("Color Match")
                     self.processing_method_changed("Color Match")
-
             else:
                 if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
                     self.processing_combobox.setCurrentText("Pattern Dither")
@@ -7078,12 +7396,12 @@ class MainWindow(QMainWindow):
                 self.threshold_sliders[color_number].setVisible(False)
 
             self.brightness_slider.setValue(55)
-
             self.manual_change = False
             self.resize_slider_changed(self.resize_slider.value())
 
         except Exception as e:
             QMessageBox.warning(self, "Error", f"Failed to load image: {str(e)}")
+
 
     def display_gif(self, file_path, progress_callback=None, message_callback=None, error_callback=None):
         """
@@ -7208,6 +7526,117 @@ class MainWindow(QMainWindow):
                 print(f"An error occurred in display_gif: {e}")
 
 
+
+    def display_video(self, file_path, progress_callback=None, message_callback=None, error_callback=None):
+        """
+        Processes and displays a video file (MP4) by creating a preview animated GIF.
+        The preview GIF is generated by sampling frames from the video, resizing and aligning
+        them on a fixed canvas (416x256, bottom-center aligned), and then loading the GIF
+        via QMovie for display.
+        """
+        try:
+            # Fixed canvas dimensions (matching display_gif)
+            frame_width, frame_height = 416, 256
+            MAX_FRAMES = 100  # Maximum number of frames to include in the preview
+
+            # Create a temporary file to save the preview GIF.
+            import tempfile  # Ensure tempfile is imported
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gif")
+            temp_path = temp_file.name
+            temp_file.close()
+
+            cap = cv2.VideoCapture(file_path)
+            if not cap.isOpened():
+                raise ValueError("Failed to open video file.")
+
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            # Calculate a skip factor so that we sample at most MAX_FRAMES frames.
+            skip_factor = max(1, total_frames // MAX_FRAMES)
+
+            frames = []
+            delays = []
+            frame_index = 0
+            sampled = 0
+
+            while True:
+                ret, frame_bgr = cap.read()
+                if not ret:
+                    break
+
+                if frame_index % skip_factor == 0:
+                    # Convert BGR to RGB and create a PIL image.
+                    frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                    pil_frame = Image.fromarray(frame_rgb).convert("RGBA")
+
+                    # Determine new dimensions and bottom-center alignment (stealing from display_gif)
+                    img_width, img_height = pil_frame.size
+                    aspect_ratio = img_width / img_height
+
+                    if aspect_ratio > 1:  # Wider than tall
+                        new_width = frame_width
+                        new_height = int(frame_width / aspect_ratio)
+                        if new_height > frame_height:
+                            new_height = frame_height
+                            new_width = int(frame_height * aspect_ratio)
+                    else:  # Taller than wide
+                        new_height = frame_height
+                        new_width = int(frame_height * aspect_ratio)
+                        if new_width > frame_width:
+                            new_width = frame_width
+                            new_height = int(frame_width / aspect_ratio)
+
+                    # Calculate offsets for bottom-center alignment.
+                    x_offset = (frame_width - new_width) // 2
+                    y_offset = frame_height - new_height
+
+                    # Create a blank RGBA canvas.
+                    blank_frame = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
+
+                    # Resize the frame (using bicubic for downscaling).
+                    resized_frame = pil_frame.resize((new_width, new_height), resample=Image.Resampling.BICUBIC)
+
+                    # Paste the resized frame onto the blank canvas.
+                    positioned_frame = blank_frame.copy()
+                    positioned_frame.paste(resized_frame, (x_offset, y_offset), resized_frame)
+
+                    frames.append(positioned_frame)
+                    delays.append(100)  # Fixed delay (in ms) per frame
+
+                    sampled += 1
+                    if progress_callback:
+                        progress_callback(sampled, MAX_FRAMES)
+                    if sampled >= MAX_FRAMES:
+                        break
+
+                frame_index += 1
+
+            cap.release()
+
+            if not frames:
+                raise ValueError("No frames were extracted from the video.")
+
+            # Save the collected frames as an animated GIF.
+            frames[0].save(
+                temp_path,
+                save_all=True,
+                append_images=frames[1:],
+                loop=0,
+                duration=delays,
+                disposal=2
+            )
+
+            # Load the preview GIF into a QMovie and display it.
+            movie = QMovie(temp_path)
+            self.image_label.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
+            self.image_label.setStyleSheet("background-color: transparent; border: none;")
+            self.image_label.setMovie(movie)
+            movie.start()
+
+        except Exception as e:
+            if error_callback:
+                error_callback(f"An error occurred in display_video: {e}")
+            else:
+                print(f"An error occurred in display_video: {e}")
 
 
     def display_image(self):

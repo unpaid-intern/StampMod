@@ -5,7 +5,7 @@ onready var _Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new(
 
 
 var stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods = null
-var debug = false
+var debug = true
 
 var KeybindsAPI = null
 var img_path = null

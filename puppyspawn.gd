@@ -72,7 +72,7 @@ var gui_path = null
 
 var wait = false
 
-var debug = false
+var debug = true
 
 
 func _ready():
