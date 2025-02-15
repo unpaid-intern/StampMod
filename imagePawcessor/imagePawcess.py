@@ -4421,13 +4421,6 @@ class MainWindow(QMainWindow):
         home_button.setIconSize(QSize(72, 72))
         home_button.clicked.connect(self.go_to_initial_menu)
         layout.addWidget(home_button, alignment=Qt.AlignTop)
-        
-        home_button.setStyleSheet("background-color: #FFFFFF;")
-        home_button.setFixedSize(72, 72)
-        home_button.move(16, 16)
-        home_button.setIconSize(QSize(72, 72))
-        home_button.clicked.connect(self.go_to_initial_menu)
-        layout.addWidget(home_button, alignment=Qt.AlignTop)
 
 
         tedit_parent = QVBoxLayout()
