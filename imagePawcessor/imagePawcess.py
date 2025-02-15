@@ -4415,7 +4415,6 @@ class MainWindow(QMainWindow):
             exe_path_str("imagePawcessor/font_stuff/home.svg"),
             exe_path_str("imagePawcessor/font_stuff/home_hover.svg")
         )
-        home_button.setStyleSheet("background-color: #FFFFFF;")
         home_button.setFixedSize(72, 72)
         home_button.move(16, 16)
         home_button.setIconSize(QSize(72, 72))
