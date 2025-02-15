@@ -8,6 +8,7 @@ import json
 import time
 import math
 import numba
+import textwrap
 from numba import njit, prange
 from pathlib import Path
 import socket
@@ -27,7 +28,8 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QFileDialog, QLabel, QPushButton,
     QVBoxLayout, QHBoxLayout, QCheckBox, QSlider, QComboBox,
     QProgressBar, QMessageBox, QStackedWidget, QLineEdit, QSizePolicy,
-    QFormLayout, QGridLayout, QSpacerItem, QFrame, QStackedLayout, QScrollArea
+    QFormLayout, QGridLayout, QSpacerItem, QFrame, QStackedLayout, QScrollArea,
+    QPlainTextEdit
 )
 from PySide6.QtGui import (
     QPixmap, QMovie, QIcon, QPainter, QCursor, QImage, QPen, QKeySequence, QShortcut
@@ -37,6 +39,53 @@ from PySide6.QtCore import (
 )
 
 
+BUTTON_STYLESHEET = """
+    QPushButton {
+        background-color: qlineargradient(
+            spread:pad, x1:0, y1:0, x2:1, y2:1, 
+            stop:0 #7b1fa2, stop:1 #9c27b0);
+        color: white;
+        border-radius: 15px;  /* Rounded corners */
+        font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
+        font-size: 20px;
+        font-weight: bold;
+        padding: 15px 15px;
+    }
+    QPushButton:hover {
+        background-color: qlineargradient(
+            spread:pad, x1:0, y1:0, x2:1, y2:1, 
+            stop:0 #9c27b0, stop:1 #d81b60);
+    }
+    QPushButton:pressed {
+        background-color: qlineargradient(
+            spread:pad, x1:0, y1:0, x2:1, y2:1, 
+            stop:0 #6a0080, stop:1 #880e4f);
+    }
+"""
+
+COMBOBOX_STYLESHEET = """
+    QComboBox {
+        background-color: #7b1fa2;
+        color: white;
+        border-radius: 5px;
+        font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
+        font-size: 16px;
+        font-weight: bold;
+        padding: 5px;
+        margin: 0px;
+    }
+    QComboBox:hover {
+        background-color: #9c27b0;
+    }
+    QComboBox::drop-down {
+        border-radius: 0px;
+    }
+    QComboBox QAbstractItemView {
+        background-color: #7b1fa2;
+        color: white;
+        selection-background-color: #9c27b0;
+    }
+"""
 
 def get_base_path() -> Path:
     if getattr(sys, 'frozen', False):
@@ -121,6 +170,44 @@ chalks_colors = False
 first = False
 brightness = 0.5
 
+# Get font image
+font_path = exe_path_fs('imagePawcessor/font.png')
+with Image.open(font_path) as im:
+    width, height = im.size
+    glyph_width = (width - 1) // 16 - 1
+    glyph_height = (height - 1) // 6 - 1
+    font_arr = np.array(im.convert("L"), dtype=np.uint8) > 128
+
+def create_image(text: str, line_width: int, text_color: tuple[int, int, int], background_color: tuple[int, int, int]):
+    text = text.strip()
+    if not len(text):
+        return Image.new((1, 1), "RGBA")
+    lines = text.replace("\r", "").replace("\t", "  ")
+    lines = textwrap.wrap(lines, line_width)
+    text_height = len(lines)
+    pixel_width = (glyph_width + 1) * (line_width - 1) + glyph_width
+    pixel_height = (glyph_height + 1) * (text_height - 1) + glyph_height
+    image = np.zeros((pixel_height, pixel_width), dtype=np.bool_)
+    for y, line in enumerate(lines):
+        img_y = y * (glyph_height + 1)
+        for x, char in enumerate(line):
+            img_x = x * (glyph_width + 1)
+            
+            char_idx = ord(char)
+            if char_idx not in range(0x20, 0x7F):
+                char_idx = ord("?")
+            
+            char_idx -= 0x20
+            char_x = (char_idx % 16) * (glyph_width + 1) + 1
+            char_y = (char_idx // 16) * (glyph_height + 1) + 1
+            image[img_y : img_y + glyph_height, img_x : img_x + glyph_width] \
+                = font_arr[char_y : char_y + glyph_height, char_x : char_x + glyph_width]
+    
+    colored_arr = np.empty((pixel_height, pixel_width, 3), dtype=np.uint8)
+    colored_arr[image] = text_color
+    colored_arr[~image] = background_color
+    Image.fromarray(colored_arr).show()
+    return colored_arr
 
 def get_clipboard_image_via_pyside6():
     """
@@ -3874,36 +3961,13 @@ class MainWindow(QMainWindow):
         self.new_color = None  # Single color 5
         self.autocolor = True
         self.default_color_key_array = [
-            {'number': 0, 'hex': 'ffe7c5', 'boost': 1.2, 'threshold': 20},
-            {'number': 1, 'hex': '2a3844', 'boost': 1.2, 'threshold': 20},
-            {'number': 2, 'hex': 'd70b5d', 'boost': 1.2, 'threshold': 20},
-            {'number': 3, 'hex': '0db39e', 'boost': 1.2, 'threshold': 20},
-            {'number': 4, 'hex': 'f4c009', 'boost': 1.2, 'threshold': 20},
-            {'number': 6, 'hex': 'bac357', 'boost': 1.2, 'threshold': 20},
+            {'number': 0, 'hex': 'ffe7c5', 'boost': 1.2, 'threshold': 20, 'name': 'White'},
+            {'number': 1, 'hex': '2a3844', 'boost': 1.2, 'threshold': 20, 'name': 'Black'},
+            {'number': 2, 'hex': 'd70b5d', 'boost': 1.2, 'threshold': 20, 'name': 'Red'},
+            {'number': 3, 'hex': '0db39e', 'boost': 1.2, 'threshold': 20, 'name': 'Blue'},
+            {'number': 4, 'hex': 'f4c009', 'boost': 1.2, 'threshold': 20, 'name': 'Yellow'},
+            {'number': 6, 'hex': 'bac357', 'boost': 1.2, 'threshold': 20, 'name': 'Green'},
         ]
-        self.button_stylesheet = """
-            QPushButton {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #7b1fa2, stop:1 #9c27b0);
-                color: white;
-                border-radius: 15px;  /* Rounded corners */
-                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
-                font-size: 20px;
-                font-weight: bold;
-                padding: 15px 30px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #9c27b0, stop:1 #d81b60);
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #6a0080, stop:1 #880e4f);
-            }
-        """
         undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
         undo_shortcut.activated.connect(self.undo_action)
         # Setup UI
@@ -4220,47 +4284,28 @@ class MainWindow(QMainWindow):
         button_layout.setAlignment(Qt.AlignTop)  # Align buttons to the top
         button_container.setLayout(button_layout)
 
-        # Button Stylesheet
-        button_stylesheet = """
-            QPushButton {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #7b1fa2, stop:1 #9c27b0);
-                color: white;
-                border-radius: 15px;  /* Rounded corners */
-                font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
-                font-size: 20px;
-                font-weight: bold;
-                padding: 15px 30px;
-            }
-            QPushButton:hover {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #9c27b0, stop:1 #d81b60);
-            }
-            QPushButton:pressed {
-                background-color: qlineargradient(
-                    spread:pad, x1:0, y1:0, x2:1, y2:1, 
-                    stop:0 #6a0080, stop:1 #880e4f);
-            }
-        """
-
         # First row of buttons: "Stamp from Files" and "Stamp from Clipboard"
         top_button_layout = QHBoxLayout()
         top_button_layout.setSpacing(20)
         top_button_layout.setAlignment(Qt.AlignCenter)
 
         self.new_image_files_button = QPushButton("Stamp from Files")
-        self.new_image_files_button.setStyleSheet(button_stylesheet)
+        self.new_image_files_button.setStyleSheet(BUTTON_STYLESHEET)
         self.new_image_files_button.setMinimumSize(200, 60)
         self.new_image_files_button.clicked.connect(self.open_image_from_files)
         top_button_layout.addWidget(self.new_image_files_button)
 
         self.new_image_clipboard_button = QPushButton("Save In-Game Art")
-        self.new_image_clipboard_button.setStyleSheet(button_stylesheet)
-        self.new_image_clipboard_button.setMinimumSize(200, 60)
+        self.new_image_clipboard_button.setStyleSheet(BUTTON_STYLESHEET)
+        self.new_image_clipboard_button.setMinimumSize(250, 60)
         self.new_image_clipboard_button.clicked.connect(self.request_and_monitor_canvas)
         top_button_layout.addWidget(self.new_image_clipboard_button)
+
+        self.new_image_text_button = QPushButton("Write Text")
+        self.new_image_text_button.setStyleSheet(BUTTON_STYLESHEET)
+        self.new_image_text_button.setMinimumSize(150, 60)
+        self.new_image_text_button.clicked.connect(self.write_text_ui)
+        top_button_layout.addWidget(self.new_image_text_button)
 
         button_layout.addLayout(top_button_layout)
 
@@ -4270,22 +4315,21 @@ class MainWindow(QMainWindow):
         bottom_button_layout.setAlignment(Qt.AlignCenter)
 
         self.save_button = QPushButton("Save Menu")
-        self.save_button.setStyleSheet(button_stylesheet)
+        self.save_button.setStyleSheet(BUTTON_STYLESHEET)
         self.save_button.setMinimumSize(160, 60)
         self.save_button.clicked.connect(self.show_save_menu)
         bottom_button_layout.addWidget(self.save_button)
 
 
         self.clip_button = QPushButton("Clipboard")
-        self.clip_button.setStyleSheet(button_stylesheet)
+        self.clip_button.setStyleSheet(BUTTON_STYLESHEET)
         self.clip_button.setMinimumSize(160, 60)
         #self.clip_button.clicked.connect(self.request_and_monitor_canvas)
         bottom_button_layout.addWidget(self.clip_button)
         self.clip_button.clicked.connect(lambda: self.open_image_from_clipboard())
 
-
         self.exit_button = QPushButton("Keybinds / Info")
-        self.exit_button.setStyleSheet(button_stylesheet)
+        self.exit_button.setStyleSheet(BUTTON_STYLESHEET)
         self.exit_button.setMinimumSize(200, 60)
         #self.exit_button.clicked.connect(self.request_and_monitor_canvas)
         bottom_button_layout.addWidget(self.exit_button)
@@ -4348,6 +4392,103 @@ class MainWindow(QMainWindow):
     def open_website(self):
         webbrowser.open("https://github.com/unpaid-intern/StampMod/?tab=readme-ov-file#keybinds")
 
+    def write_text_ui(self):
+        """
+        Shows the UI for writing text as an image.
+        """
+        if self.processing:
+            return
+
+        if not hasattr(self, 'write_text_widget'):
+            self.setup_text_menu()
+            
+        self.stacked_widget.setCurrentWidget(self.write_text_widget)
+    
+    def setup_text_menu(self):
+        """
+        Sets up the UI for writing text as an image.
+        """
+        self.write_text_widget = QWidget()
+        self.write_text_widget.setStyleSheet("background-color: #1E1A33;")
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        self.write_text_widget.setLayout(layout)
+
+        home_button = HoverButton(
+            exe_path_str("imagePawcessor/font_stuff/home.svg"),
+            exe_path_str("imagePawcessor/font_stuff/home_hover.svg")
+        )
+        home_button.setFixedSize(72, 72)
+        home_button.move(16, 16)
+        home_button.setIconSize(QSize(72, 72))
+        home_button.clicked.connect(self.go_to_initial_menu)
+        layout.addWidget(home_button, alignment=Qt.AlignTop)
+
+
+        tedit_parent = QVBoxLayout()
+        tedit_parent.setSpacing(10)
+
+        dropdown_parent = QHBoxLayout()
+        dropdown_parent.setSpacing(10)
+
+        # TODO: Properly add inputs for background color and line width
+
+        dropdown_parent.addWidget(QLabel("Text Color:"))
+
+        color_dropdown = QComboBox()
+        color_dropdown.addItems([color["name"] for color in self.default_color_key_array])
+        color_dropdown.setStyleSheet(COMBOBOX_STYLESHEET)
+
+        def change_text_color():
+            nonlocal color_dropdown
+            self.text_color = color_dropdown.currentData()
+
+        color_dropdown.currentTextChanged.connect(change_text_color)
+        dropdown_parent.addWidget(color_dropdown)
+
+        dropdown_widget = QWidget()
+        dropdown_widget.setLayout(dropdown_parent)
+
+        tedit_parent.addWidget(dropdown_widget)
+
+        self.text_edit_widget = QPlainTextEdit()
+        self.text_edit_widget.setStyleSheet("""
+            background-color: #0e0a23;
+            border-radius: 5px;
+            color: white;
+            font-family: monospace;
+            font-size: 24px;
+            font-weight: bold;
+        """)
+        self.text_edit_widget.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.text_edit_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_edit_widget.placeholderText = "Write some text here..."
+        tedit_parent.addWidget(self.text_edit_widget)
+
+        self.text_submit_button = QPushButton("Load!")
+        self.text_submit_button.setStyleSheet(BUTTON_STYLESHEET)
+        self.text_submit_button.setMinimumSize(40, 40)
+        self.text_submit_button.clicked.connect(self.load_input_text)
+        tedit_parent.addWidget(self.text_submit_button)
+
+        submit_widget = QWidget()
+        submit_widget.setLayout(tedit_parent)
+
+        layout.addWidget(submit_widget, alignment = Qt.AlignBottom)
+
+        self.stacked_widget.addWidget(self.write_text_widget)
+
+    def load_input_text(self):
+        image_arr = create_image(
+            self.text_edit_widget.toPlainText(), 
+            # TODO: Make these update
+            line_width = 50,
+            text_color = (0, 0, 0),
+            background_color = (255, 255, 255),
+        )
+        # TODO: actually load the damn thing
 
     def setup_save_menu1(self):
         """
@@ -5061,7 +5202,7 @@ class MainWindow(QMainWindow):
     def undo_action(self):
         """
         Undoes the last action.
-        """
+        ui_"""
         if not self.undo_stack:
             self.show_floating_message("Nothing to undo.")
             return
@@ -5792,29 +5933,7 @@ class MainWindow(QMainWindow):
             ]
             self.processing_combobox = QComboBox()
             self.processing_combobox.addItems([method["name"] for method in self.processing_methods])
-            self.processing_combobox.setStyleSheet("""
-                QComboBox {
-                    background-color: #7b1fa2;
-                    color: white;
-                    border-radius: 5px;
-                    font-family: 'Comic Sans MS', 'Comic Neue', 'DejaVu Sans', 'FreeSans', sans-serif;
-                    font-size: 16px;
-                    font-weight: bold;
-                    padding: 5px;
-                    margin: 0px;
-                }
-                QComboBox:hover {
-                    background-color: #9c27b0;
-                }
-                QComboBox::drop-down {
-                    border-radius: 0px;
-                }
-                QComboBox QAbstractItemView {
-                    background-color: #7b1fa2;
-                    color: white;
-                    selection-background-color: #9c27b0;
-                }
-            """)
+            self.processing_combobox.setStyleSheet(COMBOBOX_STYLESHEET)
             self.processing_combobox.currentTextChanged.connect(self.processing_method_changed)
             ring_layout.addWidget(self.processing_combobox)
 
@@ -6045,7 +6164,7 @@ class MainWindow(QMainWindow):
         button_container.setLayout(button_layout)
 
         # Styling for buttons (reused from the initial menu)
-        button_stylesheet = """
+        big_button_stylesheet = """
             QPushButton {
                 background-color: qlineargradient(
                     spread:pad, x1:0, y1:0, x2:1, y2:1, 
@@ -6072,13 +6191,13 @@ class MainWindow(QMainWindow):
 
         # "Maybe not..." button
         self.maybe_not_button = QPushButton("Back to Options")
-        self.maybe_not_button.setStyleSheet(button_stylesheet)
+        self.maybe_not_button.setStyleSheet(big_button_stylesheet)
         self.maybe_not_button.setMinimumSize(240, 60)
         self.maybe_not_button.clicked.connect(self.retry_processing)
         button_layout.addWidget(self.maybe_not_button)
 
         self.save_button = QPushButton("Save")
-        self.save_button.setStyleSheet(button_stylesheet)
+        self.save_button.setStyleSheet(big_button_stylesheet)
         self.save_button.setMinimumSize(100, 60)
         # Placeholder action for Save button
         self.save_button.clicked.connect(self.save_current)
@@ -6086,7 +6205,7 @@ class MainWindow(QMainWindow):
 
         # "Awrooo!" button
         self.awrooo_button = QPushButton("Home")
-        self.awrooo_button.setStyleSheet(button_stylesheet)
+        self.awrooo_button.setStyleSheet(big_button_stylesheet)
         self.awrooo_button.setMinimumSize(120, 60)
         self.awrooo_button.clicked.connect(lambda: self.go_to_initial_menu(True))
         button_layout.addWidget(self.awrooo_button)
