@@ -1969,77 +1969,145 @@ def ordered_dithering(img, color_key, params):
 
 
 
+@njit
+def find_nearest_color(px, palette):
+    """
+    px: float32[3] - a single pixel (R,G,B) in float
+    palette: float32[n,3] - palette of colors
+    Returns the (R,G,B) of the nearest color in palette.
+    """
+    best_index = 0
+    best_dist = 1e12
+    for i in range(palette.shape[0]):
+        dr = px[0] - palette[i, 0]
+        dg = px[1] - palette[i, 1]
+        db = px[2] - palette[i, 2]
+        dist = dr * dr + dg * dg + db * db
+        if dist < best_dist:
+            best_dist = dist
+            best_index = i
+    return palette[best_index]
+
+##############################################################################
+# 2) The main dithering loop, compiled by Numba
+##############################################################################
+@njit(parallel=True)
+def dither_loop(arr, rand_offs, palette, strength):
+    """
+    arr: float32 array [H,W,3] (the image we are modifying in place)
+    rand_offs: float32 array [H,W,3] (precomputed random offsets)
+    palette: float32 array [N,3]
+    strength: float
+    """
+    error_scale = 0.2 * strength
+    height, width, _ = arr.shape
+
+    for y in prange(height):
+        for x in range(width):
+            old_pixel = arr[y, x]
+
+            # Add random offset
+            noisy_pixel = old_pixel + rand_offs[y, x]
+
+            # Clamp to [0..255]
+            for c in range(3):
+                if noisy_pixel[c] < 0:
+                    noisy_pixel[c] = 0
+                elif noisy_pixel[c] > 255:
+                    noisy_pixel[c] = 255
+
+            # Quantize to nearest color
+            new_pixel = find_nearest_color(noisy_pixel, palette)
+            arr[y, x] = new_pixel
+
+            # Compute error
+            quant_error = old_pixel - new_pixel
+
+            # Potential neighbors
+            neighbors = []
+            if x + 1 < width:
+                neighbors.append((y, x + 1))
+            if y + 1 < height:
+                neighbors.append((y + 1, x))
+            if (x + 1 < width) and (y + 1 < height):
+                neighbors.append((y + 1, x + 1))
+            if (x - 1 >= 0) and (y + 1 < height):
+                neighbors.append((y + 1, x - 1))
+
+            # Distribute error to up to 2 neighbors
+            n_count = min(len(neighbors), 2)
+            for i in range(n_count):
+                ny = int(neighbors[i][0])
+                nx = int(neighbors[i][1])
+
+                arr[ny, nx] += quant_error * error_scale
+
+                # Clamp neighbors
+                for c in range(3):
+                    if arr[ny, nx, c] < 0:
+                        arr[ny, nx, c] = 0
+                    elif arr[ny, nx, c] > 255:
+                        arr[ny, nx, c] = 255
+
+##############################################################################
+# 3) The high-level function your code calls
+##############################################################################
 @register_processing_method(
     'Random Dither',
-    default_params={'strength': 1.0, 'smoothing': False},
-    description="Adds randomized dithering for a noisier but more natural texture."
+    default_params={'strength': 1.0},
+    description="Random dithering with error diffusion."
 )
-def random_dithering(img, color_key, params):
-    global use_lab
+def random_dither(img, color_key, params):
+    """
+    A random dithering algorithm with error diffusion, accelerated by Numba.
+    Single param: 'strength' (float). Produces more interesting, varied 
+    results than simple color matching.
+
+    Args:
+        img (PIL.Image.Image): Input image, mode RGB or RGBA.
+        color_key (dict): e.g. {0:(R,G,B), 1:(R,G,B), ...} palette 
+        params (dict): Contains 'strength' (float).
+
+    Returns:
+        PIL.Image.Image: Dithered image (same mode as input).
+    """
     strength = params.get('strength', 1.0)
-    smoothing = params.get('smoothing', False)
-    # The noise standard deviation (adjust as desired)
-    noise_std = 32 * strength
 
-    # Work on a copy of the image.
-    img = img.copy()
+    # Convert color_key (dict) -> array of shape (N,3)
+    color_array = np.array(list(color_key.values()), dtype=np.float32)
+
+    # Separate alpha if needed
     has_alpha = (img.mode == 'RGBA')
-    img_array = np.array(img, dtype=np.uint8)
-    
-    # Separate RGB and alpha (if present)
+    img = img.copy()
     if has_alpha:
-        rgb_data = img_array[:, :, :3]
-        alpha_channel = img_array[:, :, 3]
+        rgba_data = np.array(img, dtype=np.float32)
+        alpha_channel = rgba_data[:, :, 3].copy()  # preserve alpha
+        work_array = rgba_data[:, :, :3]           # just the RGB
     else:
-        rgb_data = img_array
+        work_array = np.array(img, dtype=np.float32)
 
-    height, width = rgb_data.shape[:2]
-    
-    if use_lab:
-        # Convert the entire image to LAB using OpenCV (vectorized)
-        lab_data = cv2.cvtColor(rgb_data, cv2.COLOR_RGB2LAB)
-        # Generate noise arrays for each channel.
-        # For LAB, we use a lower noise std for the chromatic channels.
-        l_noise = np.random.normal(0, noise_std * 0.5, size=(height, width))
-        a_noise = np.random.normal(0, noise_std * 0.25, size=(height, width))
-        b_noise = np.random.normal(0, noise_std * 0.25, size=(height, width))
-        # Optionally smooth the noise to yield more natural transitions.
-        if smoothing:
-            l_noise = cv2.GaussianBlur(l_noise.astype(np.float32), (3, 3), 0)
-            a_noise = cv2.GaussianBlur(a_noise.astype(np.float32), (3, 3), 0)
-            b_noise = cv2.GaussianBlur(b_noise.astype(np.float32), (3, 3), 0)
-        # Add the noise to the LAB image (working in float32 for precision)
-        noisy_lab = lab_data.astype(np.float32)
-        noisy_lab[:, :, 0] += l_noise
-        noisy_lab[:, :, 1] += a_noise
-        noisy_lab[:, :, 2] += b_noise
-        # Clip the LAB values back into the 0-255 range and convert to uint8
-        noisy_lab = np.clip(noisy_lab, 0, 255).astype(np.uint8)
-        # Convert back to RGB using OpenCV (vectorized)
-        noisy_rgb = cv2.cvtColor(noisy_lab, cv2.COLOR_LAB2RGB)
-    else:
-        # For RGB, generate noise for each channel
-        noise = np.random.normal(0, noise_std, size=rgb_data.shape)
-        if smoothing:
-            noise = cv2.GaussianBlur(noise.astype(np.float32), (3, 3), 0)
-        # Add the noise and clip to valid range
-        noisy_rgb = rgb_data.astype(np.float32) + noise
-        noisy_rgb = np.clip(noisy_rgb, 0, 255).astype(np.uint8)
-    
-    # Use the optimized, vectorized color mapping routine to snap each pixel
-    # to its nearest palette color. (This function is assumed to be accelerated
-    # with numba or other techniques.)
-    mapped_rgb = find_closest_colors_image(noisy_rgb, color_key)
-    
-    # Reattach the alpha channel if needed.
+    h, w = work_array.shape[:2]
+
+    # Precompute random offsets in Python (Numba's random is limited)
+    amplitude = 30.0 * strength
+    # shape (h, w, 3) each in [-amplitude, amplitude]
+    random_offsets = (2.0 * np.random.rand(h, w, 3) - 1.0) * amplitude
+
+    # Run dithering
+    dither_loop(work_array, random_offsets.astype(np.float32), color_array, strength)
+
+    # Convert to uint8
+    work_array = np.clip(work_array, 0, 255).astype(np.uint8)
+
+    # Reattach alpha if needed
     if has_alpha:
-        mapped_data = np.dstack((mapped_rgb[:, :, :3], alpha_channel))
-        result_mode = 'RGBA'
+        final_data = np.dstack((work_array, alpha_channel.astype(np.uint8)))
+        result_img = Image.fromarray(final_data, mode='RGBA')
     else:
-        mapped_data = mapped_rgb
-        result_mode = 'RGB'
-    
-    return Image.fromarray(mapped_data, mode=result_mode)
+        result_img = Image.fromarray(work_array, mode='RGB')
+
+    return result_img
+
 
 @register_processing_method(
     'Atkinson Dither',
@@ -2650,7 +2718,6 @@ def process_and_save_gif(
             error_callback(error_message)
 
 
-
 def process_and_save_video(
     video_path,
     target_size,
@@ -2665,22 +2732,22 @@ def process_and_save_video(
     error_callback=None
 ):
     """
-    Processes and saves an MP4 video into 'stamp.txt' and 'frames.txt' exactly the same way
-    as GIF frames, but at a maximum of 8 FPS (discarding frames beyond 8 FPS to preserve 
-    overall playback speed).
+    Processes and saves a video (MP4, WEBM, etc.) into 'stamp.txt' and 'frames.txt' the same way
+    as GIF frames, but at a maximum of 8 FPS (discarding frames beyond 8 FPS to preserve overall
+    playback speed).
 
     Args:
-        video_path (str): Path to the input video (mp4).
+        video_path (str): Path to the input video file (MP4, WEBM, etc.).
         target_size (tuple): Target size for the frames (width, height).
         process_mode (str): Processing mode.
         use_lab_flag (bool): Flag to use LAB color space.
         process_params (dict): Additional processing parameters.
         color_key_array (list): List of color key dictionaries with 'number' and 'hex' keys.
-        remove_bg (bool): Flag to remove background.
+        remove_bg (bool): Flag to remove the background.
         preprocess_flag (bool): Flag to preprocess the frames.
-        progress_callback (function, optional): Callback for progress updates.
-        message_callback (function, optional): Callback for messages.
-        error_callback (function, optional): Callback for errors.
+        progress_callback (function, optional): Callback for progress updates (takes `progress` float).
+        message_callback (function, optional): Callback for logging messages (takes `msg` string).
+        error_callback (function, optional): Callback for logging errors (takes `error_msg` string).
     """
     try:
         # ---------------------------------------------------------------------
@@ -2706,7 +2773,7 @@ def process_and_save_video(
         preview_folder = create_and_clear_preview_folder(message_callback)
 
         # ---------------------------------------------------------------------
-        # Build the color key from the provided array (fix for "color key is not defined")
+        # Build the color key from the provided array
         # ---------------------------------------------------------------------
         color_key = build_color_key(color_key_array)
 
@@ -2720,17 +2787,16 @@ def process_and_save_video(
         original_fps = cap.get(cv2.CAP_PROP_FPS)
         total_frames_in_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
+        # Fallback if OpenCV cannot read FPS properly
         if original_fps <= 0:
-            # Fallback in case OpenCV fails to read FPS properly
             original_fps = 30.0
 
         # We will capture at most 8 FPS, preserving the total duration:
         final_fps = min(original_fps, 8)
-        # Skip factor (approx.) to drop frames if above 8 FPS
+        # Skip factor to drop frames if above 8 FPS
         skip_factor = round(original_fps / final_fps) if final_fps > 0 else 1
 
-        # For simpler logic, we treat the final delay as uniform (in milliseconds).
-        # Example: at 8 FPS, the delay is 125ms per frame; at 5 FPS, 200ms, etc.
+        # Final delay in ms (example: 8 FPS => 125 ms, 5 FPS => 200 ms)
         final_delay_ms = int(round(1000.0 / final_fps))
 
         if message_callback:
@@ -2753,42 +2819,43 @@ def process_and_save_video(
             # Decide whether we keep this frame (based on skip_factor)
             if frame_index % skip_factor == 0:
                 kept_count += 1
-                # Convert BGR to RGB and create a Pillow image
+                # Convert BGR to RGB
                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                 pil_img = Image.fromarray(frame_rgb)
 
                 # Make a writable copy of the image
                 frame = pil_img.copy()
 
-                # Prepare the image (convert to RGBA if needed)
+                # Prepare the image (e.g., ensure RGBA)
                 frame = prepare_image(frame)
 
-                # Resize the image if needed
+                # Resize if needed
                 if target_size is not None:
                     frame = resize_image(frame, target_size)
 
-                # Preprocess the image if needed
+                # Preprocessing
                 if preprocess_flag:
                     frame_np = np.array(frame)
                     frame_np = preprocess_image(frame_np, color_key_array, message_callback, True)
                     frame = Image.fromarray(frame_np, 'RGBA')
 
+                # Apply brightness if desired
                 global brightness
                 if brightness != 0.5:
                     frame = adjust_brightness(frame, brightness)
                     if message_callback:
                         message_callback("Manual Brightness Adjusted")
 
-                # Apply the processing method to the frame using the built color key
+                # Apply the main processing method using the color key
                 frame = process_image(frame, color_key, process_mode, process_params)
 
-                # Ensure the image is in RGBA mode and is writable
+                # Ensure RGBA
                 if frame.mode != 'RGBA':
                     frame = frame.convert('RGBA')
                 else:
                     frame = frame.copy()
 
-                # Process translucent pixels: any pixel below 80% opacity is made fully transparent
+                # Make fully transparent any pixels with <80% opacity
                 pixels = frame.load()
                 width, height = frame.size
                 opacity_threshold = 204  # 80% of 255
@@ -2798,7 +2865,7 @@ def process_and_save_video(
                         if a < opacity_threshold:
                             pixels[x, y] = (0, 0, 0, 0)
 
-                # Save frame as PNG
+                # Save as PNG
                 frame_filename = f"frame_{kept_count}.png"
                 frame_path = os.path.join(frames_dir, frame_filename)
                 frame.save(frame_path)
@@ -2827,16 +2894,16 @@ def process_and_save_video(
         # 4) Generate uniform delays array
         # ---------------------------------------------------------------------
         delays = [final_delay_ms] * total_kept_frames
-        uniform_delay = delays[0]  # Uniform delay for all frames
+        uniform_delay = delays[0]  # Because we force 8 FPS uniformly
 
         # ---------------------------------------------------------------------
-        # 5) Prepare 'stamp.txt' by analyzing the first kept frame
+        # 5) Prepare 'stamp.txt' using the first kept frame
         # ---------------------------------------------------------------------
         first_frame_path = kept_frames_paths[0]
         if not os.path.exists(first_frame_path):
             raise FileNotFoundError(f"First frame not found at {first_frame_path}")
 
-        # Convert color_key_array to NumPy arrays for fast color matching
+        # Convert color_key_array for fast color matching
         color_key_rgb = np.array([hex_to_rgb(color['hex']) for color in color_key_array], dtype=np.float32)
         color_key_numbers = np.array([color['number'] for color in color_key_array], dtype=np.int32)
 
@@ -2856,10 +2923,10 @@ def process_and_save_video(
                 # Convert to RGBA and extract pixel data
                 frame_array = np.array(first_frame.convert('RGBA'))
                 alpha_channel = frame_array[:, :, 3]
-                mask = alpha_channel > 191  # Opaque pixel threshold
+                mask = alpha_channel > 191  # Opaque
                 rgb_array = frame_array[:, :, :3].astype(np.float32)
 
-                # Prepare arrays to track the reference and store original values
+                # Arrays to track the reference and store original
                 Frame1Array = -1 * np.ones((height, width), dtype=np.int32)
                 first_frame_pixels = -1 * np.ones((height, width), dtype=np.int32)
 
@@ -2871,15 +2938,15 @@ def process_and_save_video(
                             Frame1Array[y, x] = color_num
                             first_frame_pixels[y, x] = color_num
 
-                            # Write scaled pixel coordinates and color number
+                            # Write scaled pixel coords + color
                             scaled_x = round(x * 0.1, 1)
                             scaled_y = round(y * 0.1, 1)
                             stamp_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
 
         # ---------------------------------------------------------------------
-        # 6) Build 'frames.txt' by comparing each subsequent frame to the reference
+        # 6) Build 'frames.txt'
         # ---------------------------------------------------------------------
-        header_frame_number = 1  # Frame header counter
+        header_frame_number = 1
 
         for idx in range(1, total_kept_frames):
             current_path = kept_frames_paths[idx]
@@ -2897,11 +2964,12 @@ def process_and_save_video(
                             color_num = find_closest_color2(pixel, color_key_rgb, color_key_numbers)
                             CurrentFrameArray[y, x] = color_num
 
-                # Identify differences between current frame and reference
+                # Differences from reference
                 diffs = np.argwhere(CurrentFrameArray != Frame1Array)
 
                 with open(frames_txt_path, 'a') as frames_file:
-                    # Write frame header; if uniform_delay were variable, we could include it here
+                    # Write frame header
+                    # If uniform_delay = -1, we would individually specify frame_delay
                     if uniform_delay == -1:
                         frame_delay = delays[idx]
                         frames_file.write(f"frame,{header_frame_number},{frame_delay}\n")
@@ -2914,7 +2982,7 @@ def process_and_save_video(
                         scaled_y = round(dy * 0.1, 1)
                         frames_file.write(f"{scaled_x},{scaled_y},{color_num}\n")
 
-                # Update the reference frame for the next comparison
+                # Update reference
                 Frame1Array = CurrentFrameArray.copy()
 
                 if progress_callback:
@@ -2924,7 +2992,7 @@ def process_and_save_video(
                 header_frame_number += 1
 
         # ---------------------------------------------------------------------
-        # 7) Compare final frame to the first frame to "close the loop"
+        # 7) Compare final frame to first frame => "close the loop"
         # ---------------------------------------------------------------------
         diffs = np.argwhere(Frame1Array != first_frame_pixels)
         with open(frames_txt_path, 'a') as frames_file:
@@ -2945,7 +3013,7 @@ def process_and_save_video(
             message_callback(f"Video frames processed! Data saved to: {frames_txt_path}")
 
         # ---------------------------------------------------------------------
-        # 8) Create a preview GIF from the extracted frames (optional)
+        # 8) Create a preview GIF from the extracted frames
         # ---------------------------------------------------------------------
         create_preview_gif(
             total_kept_frames,
@@ -2968,6 +3036,7 @@ def process_and_save_video(
         traceback.print_exc()
         if error_callback:
             error_callback(error_message)
+
 
 
 
@@ -3321,7 +3390,7 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
                 return
         else:
             # Check if the file is a video (based on extension)
-            if str(image_path).lower().endswith('.mp4'):
+            if str(image_path).lower().endswith('.mp4') or str(image_path).lower().endswith('.webm'):
                 if message_callback:
                     message_callback("Processing video...")
                 process_and_save_video(image_path, resize_dim, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag, progress_callback, message_callback, error_callback)
@@ -6519,11 +6588,11 @@ class MainWindow(QMainWindow):
         if not self.manual_change:
             if not self.is_gif:
                 if value > 200:
-                    if "Hybrid Dither" in [method["name"] for method in self.processing_methods]:
+                    if "Jarvis Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)  # Block signals
-                        self.processing_combobox.setCurrentText("Hybrid Dither")
+                        self.processing_combobox.setCurrentText("Jarvis Dither")
                         self.processing_combobox.blockSignals(False)  # Unblock signals
-                        self.processing_method_changed("Hybrid Dither", strength=False, manual=False)
+                        self.processing_method_changed("Jarvis Dither", strength=False, manual=False)
                 elif value > 64:
                     if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)
@@ -7009,7 +7078,7 @@ class MainWindow(QMainWindow):
         self.reset_to_initial_state()     
         file_dialog = QFileDialog(self)
         # Allow both images and MP4 videos to be picked.
-        file_dialog.setNameFilters(["Images and Videos (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.mp4)"])
+        file_dialog.setNameFilters(["Images and Videos (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.mp4 *webm)"])
         if file_dialog.exec():
             file_path = file_dialog.selectedFiles()[0]
             self.image_path = file_path
@@ -7288,7 +7357,7 @@ class MainWindow(QMainWindow):
             # If the file is a video (e.g. MP4), process it with display_video.
             isvideo = False
             # Convert file_path to string for safe lower() comparison.
-            if str(file_path).lower().endswith('.mp4'):
+            if str(file_path).lower().endswith('.mp4') or str(file_path).lower().endswith('.webm'):
                 self.is_gif = True
                 isvideo = True
                 self.image_path = file_path
@@ -7417,7 +7486,7 @@ class MainWindow(QMainWindow):
             message_callback (callable, optional): Function to display messages, accepts (message).
             error_callback (callable, optional): Function to handle errors, accepts (error_message).
         """
-        MAX_FRAMES = 500  # Maximum number of frames to process
+        MAX_FRAMES = 200  # Maximum number of frames to process
 
         try:
             # Ensure the passed widget is a QLabel
@@ -7529,82 +7598,95 @@ class MainWindow(QMainWindow):
 
     def display_video(self, file_path, progress_callback=None, message_callback=None, error_callback=None):
         """
-        Processes and displays a video file (MP4) by creating a preview animated GIF.
-        The preview GIF is generated by sampling frames from the video, resizing and aligning
-        them on a fixed canvas (416x256, bottom-center aligned), and then loading the GIF
-        via QMovie for display.
+        Creates a transparent (magenta-keyed) preview GIF by:
+        1. Sampling up to MAX_FRAMES from the video.
+        2. Building a single 'global' palette from a small mosaic of frames
+            (rather than re-quantizing each frame independently).
+        3. Applying that palette to all frames, ensuring consistent color
+            and more stable processing times when frame counts match.
         """
-        try:
-            # Fixed canvas dimensions (matching display_gif)
-            frame_width, frame_height = 416, 256
-            MAX_FRAMES = 100  # Maximum number of frames to include in the preview
 
-            # Create a temporary file to save the preview GIF.
-            import tempfile  # Ensure tempfile is imported
+        # Helper: find index of color=(R,G,B) in a 768-element palette list, or None if not found
+        def find_color_index(palette_list, color):
+            r, g, b = color
+            for i in range(256):
+                if (palette_list[3*i] == r and
+                    palette_list[3*i + 1] == g and
+                    palette_list[3*i + 2] == b):
+                    return i
+            return None
+
+        try:
+            # Basic settings
+            frame_width, frame_height = 416, 256
+            MAX_FRAMES = 100
+            MAGIC_COLOR = (255, 0, 255)  # magenta
+            # For the global palette
+            GLOBAL_PALETTE_COLORS = 64   # fewer colors = faster generation
+
+            # Create temporary GIF file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gif")
             temp_path = temp_file.name
             temp_file.close()
 
+            # Open video
             cap = cv2.VideoCapture(file_path)
             if not cap.isOpened():
-                raise ValueError("Failed to open video file.")
+                raise ValueError(f"Failed to open video file: {file_path}")
 
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            # Calculate a skip factor so that we sample at most MAX_FRAMES frames.
             skip_factor = max(1, total_frames // MAX_FRAMES)
 
-            frames = []
+            rgb_frames = []
             delays = []
             frame_index = 0
             sampled = 0
 
+            # ----------------------------
+            # 1) SAMPLE/RESIZE FRAMES
+            # ----------------------------
             while True:
                 ret, frame_bgr = cap.read()
                 if not ret:
-                    break
+                    break  # no more frames
 
                 if frame_index % skip_factor == 0:
-                    # Convert BGR to RGB and create a PIL image.
+                    # Convert BGR -> RGB for Pillow
                     frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                    pil_frame = Image.fromarray(frame_rgb).convert("RGBA")
+                    pil_frame = Image.fromarray(frame_rgb)
 
-                    # Determine new dimensions and bottom-center alignment (stealing from display_gif)
-                    img_width, img_height = pil_frame.size
-                    aspect_ratio = img_width / img_height
+                    # Preserve aspect ratio within 416x256
+                    img_w, img_h = pil_frame.size
+                    aspect_ratio = img_w / float(img_h)
 
-                    if aspect_ratio > 1:  # Wider than tall
-                        new_width = frame_width
-                        new_height = int(frame_width / aspect_ratio)
-                        if new_height > frame_height:
-                            new_height = frame_height
-                            new_width = int(frame_height * aspect_ratio)
-                    else:  # Taller than wide
-                        new_height = frame_height
-                        new_width = int(frame_height * aspect_ratio)
-                        if new_width > frame_width:
-                            new_width = frame_width
-                            new_height = int(frame_width / aspect_ratio)
+                    if aspect_ratio > 1:
+                        new_w = frame_width
+                        new_h = int(new_w / aspect_ratio)
+                        if new_h > frame_height:
+                            new_h = frame_height
+                            new_w = int(new_h * aspect_ratio)
+                    else:
+                        new_h = frame_height
+                        new_w = int(new_h * aspect_ratio)
+                        if new_w > frame_width:
+                            new_w = frame_width
+                            new_h = int(new_w / aspect_ratio)
 
-                    # Calculate offsets for bottom-center alignment.
-                    x_offset = (frame_width - new_width) // 2
-                    y_offset = frame_height - new_height
+                    x_offset = (frame_width - new_w) // 2
+                    y_offset = frame_height - new_h
 
-                    # Create a blank RGBA canvas.
-                    blank_frame = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
+                    # Fill background with magic color
+                    blank_frame = Image.new("RGB", (frame_width, frame_height), MAGIC_COLOR)
+                    resized_frame = pil_frame.resize((new_w, new_h), Image.Resampling.BICUBIC)
+                    blank_frame.paste(resized_frame, (x_offset, y_offset))
 
-                    # Resize the frame (using bicubic for downscaling).
-                    resized_frame = pil_frame.resize((new_width, new_height), resample=Image.Resampling.BICUBIC)
-
-                    # Paste the resized frame onto the blank canvas.
-                    positioned_frame = blank_frame.copy()
-                    positioned_frame.paste(resized_frame, (x_offset, y_offset), resized_frame)
-
-                    frames.append(positioned_frame)
-                    delays.append(100)  # Fixed delay (in ms) per frame
-
+                    rgb_frames.append(blank_frame)
+                    delays.append(100)  # e.g. 100 ms/frame
                     sampled += 1
+
                     if progress_callback:
-                        progress_callback(sampled, MAX_FRAMES)
+                        progress_callback(sampled, min(total_frames, MAX_FRAMES))
+
                     if sampled >= MAX_FRAMES:
                         break
 
@@ -7612,20 +7694,75 @@ class MainWindow(QMainWindow):
 
             cap.release()
 
-            if not frames:
-                raise ValueError("No frames were extracted from the video.")
+            if not rgb_frames:
+                raise ValueError("No frames extracted from the video.")
 
-            # Save the collected frames as an animated GIF.
-            frames[0].save(
+            # If only one frame, duplicate it so we don't get single-frame palette issues
+            if len(rgb_frames) == 1:
+                rgb_frames.append(rgb_frames[0].copy())
+                delays.append(delays[0])
+
+            # ----------------------------
+            # 2) BUILD A GLOBAL PALETTE
+            # ----------------------------
+            # We'll make a small "mosaic" that contains all frames, but at lower resolution,
+            # so we do only ONE adaptive quantization pass.
+            # The mosaic is just to compute a good palette.
+            tile_size = 32  # each frame becomes 32x32 in the mosaic
+            num_frames = len(rgb_frames)
+            side = int(math.ceil(math.sqrt(num_frames)))  # e.g. 10 if we have up to 100 frames
+
+            mosaic_w = side * tile_size
+            mosaic_h = side * tile_size
+            mosaic = Image.new("RGB", (mosaic_w, mosaic_h), MAGIC_COLOR)
+
+            for i, frame in enumerate(rgb_frames):
+                # scale each preview frame down to tile_size
+                small = frame.resize((tile_size, tile_size), Image.Resampling.BICUBIC)
+                x = (i % side) * tile_size
+                y = (i // side) * tile_size
+                mosaic.paste(small, (x, y))
+
+            # Convert mosaic to 'P' with an adaptive palette, then extract that palette
+            mosaic_p = mosaic.convert("P", palette=Image.ADAPTIVE, colors=GLOBAL_PALETTE_COLORS)
+            global_palette = mosaic_p.getpalette()
+
+            # Find magenta in that global palette
+            transparency_index = find_color_index(global_palette, MAGIC_COLOR)
+
+            # ----------------------------
+            # 3) APPLY PALETTE TO FRAMES
+            # ----------------------------
+            p_frames = []
+            for f in rgb_frames:
+                # Use the mosaic's palette for a consistent quantization
+                # Pillow: "Image.quantize(palette=ref_image) -> uses the palette from ref_image"
+                p_f = f.quantize(palette=mosaic_p)  
+                # If we found magenta in the palette, mark it transparent
+                if transparency_index is not None:
+                    p_f.info["transparency"] = transparency_index
+
+                p_frames.append(p_f)
+
+            # ----------------------------
+            # 4) SAVE AS GIF
+            # ----------------------------
+            # For maximum speed, we often do optimize=False. If you want smaller files, use True,
+            # but it can take longer. You can also do a heuristic (optimize if p_frames > 10, etc.)
+            p_frames[0].save(
                 temp_path,
+                format="GIF",
                 save_all=True,
-                append_images=frames[1:],
+                append_images=p_frames[1:],
                 loop=0,
                 duration=delays,
-                disposal=2
+                disposal=2,
+                optimize=False  # faster
             )
 
-            # Load the preview GIF into a QMovie and display it.
+            # ----------------------------
+            # 5) DISPLAY VIA QMovie
+            # ----------------------------
             movie = QMovie(temp_path)
             self.image_label.setAlignment(Qt.AlignBottom | Qt.AlignHCenter)
             self.image_label.setStyleSheet("background-color: transparent; border: none;")
@@ -7639,6 +7776,7 @@ class MainWindow(QMainWindow):
                 print(f"An error occurred in display_video: {e}")
 
 
+                
     def display_image(self):
         """
         Displays a static image resized to 420x420.

@@ -108,7 +108,7 @@ func _chalk_update(pos):
 
 
 func _delete(gif = false):
-	pass
+	return
 	if not update_dynamic_nodes():
 		return 
 	if _hud.using_chat and _hud:
