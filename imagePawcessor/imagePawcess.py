@@ -46,8 +46,8 @@ def get_base_path() -> Path:
 
         base_path = Path(__file__).parent
     
-    if base_path.stem == "imagePawcess":
-        base_path = base_path.parent.parent
+    if base_path.stem == "dist":
+        base_path = base_path.parent
     return base_path.parent
 
 def exe_path_fs(relative_path: str) -> Path:
@@ -90,7 +90,7 @@ def get_config_path() -> Path:
     base_path = get_base_path()
 
     # Navigate up until we reach 'GDWeave'
-    while base_path.name in ["mods", mod_name, "imagePawcess", "dist", "imagePawcessor"]:
+    while base_path.name in ["mods", mod_name, "dist", "imagePawcessor"]:
         base_path = base_path.parent
 
     # Ensure the resolved base path is correct
