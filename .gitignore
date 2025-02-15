@@ -5,8 +5,7 @@
 !imagePawcessor/
 !imagePawcessor/imagePawcessSetup.py
 !imagePawcessor/imagePawcess.py
-!imagePawcessor/imagePawcessLinux.py
-!imagePawcessor/imagePawcessLinux.spec
+!imagePawcessor/imagePawcess.spec
 !app_icon.ico
 !puppyspawn.gd
 !main.gd
