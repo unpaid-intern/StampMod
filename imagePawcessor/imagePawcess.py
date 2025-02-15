@@ -45,8 +45,9 @@ def get_base_path() -> Path:
     else:
 
         base_path = Path(__file__).parent
-
-
+    
+    if base_path.stem == "imagePawcess":
+        base_path = base_path.parent.parent
     return base_path.parent
 
 def exe_path_fs(relative_path: str) -> Path:
