@@ -8,6 +8,7 @@ import json
 import time
 import math
 import numba
+import textwrap
 from numba import njit, prange
 from pathlib import Path
 import socket
@@ -175,19 +176,18 @@ with Image.open(font_path) as im:
     width, height = im.size
     glyph_width = (width - 1) // 16 - 1
     glyph_height = (height - 1) // 6 - 1
-    font_arr = np.array(im.convert("L"), dtype=np.uint8)
+    font_arr = np.array(im.convert("L"), dtype=np.uint8) > 128
 
-def create_image(text: str):
+def create_image(text: str, line_width: int, text_color: tuple[int, int, int], background_color: tuple[int, int, int]):
     text = text.strip()
     if not len(text):
         return Image.new((1, 1), "RGBA")
-    lines = text.replace("\r", "").replace("\t", "  ").split("\n")
-    
-    text_width = max(len(line) for line in lines)
+    lines = text.replace("\r", "").replace("\t", "  ")
+    lines = textwrap.wrap(lines, line_width)
     text_height = len(lines)
-    pixel_width = (glyph_width + 1) * (text_width - 1) + glyph_width
+    pixel_width = (glyph_width + 1) * (line_width - 1) + glyph_width
     pixel_height = (glyph_height + 1) * (text_height - 1) + glyph_height
-    image = np.zeros((pixel_height, pixel_width), dtype=np.uint8)
+    image = np.zeros((pixel_height, pixel_width), dtype=np.bool_)
     for y, line in enumerate(lines):
         img_y = y * (glyph_height + 1)
         for x, char in enumerate(line):
@@ -203,7 +203,11 @@ def create_image(text: str):
             image[img_y : img_y + glyph_height, img_x : img_x + glyph_width] \
                 = font_arr[char_y : char_y + glyph_height, char_x : char_x + glyph_width]
     
-    return image
+    colored_arr = np.empty((pixel_height, pixel_width, 3), dtype=np.uint8)
+    colored_arr[image] = text_color
+    colored_arr[~image] = background_color
+    Image.fromarray(colored_arr).show()
+    return colored_arr
 
 def get_clipboard_image_via_pyside6():
     """
@@ -4428,14 +4432,18 @@ class MainWindow(QMainWindow):
         dropdown_parent = QHBoxLayout()
         dropdown_parent.setSpacing(10)
 
-        def change_text_color():
-            pass
+        # TODO: Properly add inputs for background color and line width
 
         dropdown_parent.addWidget(QLabel("Text Color:"))
 
         color_dropdown = QComboBox()
         color_dropdown.addItems([color["name"] for color in self.default_color_key_array])
         color_dropdown.setStyleSheet(COMBOBOX_STYLESHEET)
+
+        def change_text_color():
+            nonlocal color_dropdown
+            self.text_color = color_dropdown.currentData()
+
         color_dropdown.currentTextChanged.connect(change_text_color)
         dropdown_parent.addWidget(color_dropdown)
 
@@ -4473,9 +4481,14 @@ class MainWindow(QMainWindow):
         self.stacked_widget.addWidget(self.write_text_widget)
 
     def load_input_text(self):
-        image_arr = create_image(self.text_edit_widget.toPlainText())
-        # todo: actually load the damn thing
-        Image.fromarray(image_arr).show()
+        image_arr = create_image(
+            self.text_edit_widget.toPlainText(), 
+            # TODO: Make these update
+            line_width = 50,
+            text_color = (0, 0, 0),
+            background_color = (255, 255, 255),
+        )
+        # TODO: actually load the damn thing
 
     def setup_save_menu1(self):
         """
