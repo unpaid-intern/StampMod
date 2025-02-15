@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_submodules
 numba_hidden_imports = collect_submodules('numba')
 
 a = Analysis(
-    ['imagePawcessLinux.py'],  # Your main script
+    ['imagePawcess.py'],  # Your main script
     pathex=[],  # Add any additional search paths if necessary
     binaries=[],  # Add any additional binary files if necessary
     datas=[],  # Add any additional data files if necessary

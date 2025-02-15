@@ -73,6 +73,11 @@ def get_appdata_dir() -> Path:
     appdata_dir.mkdir(parents=True, exist_ok=True)  # Ensure it exists
     return appdata_dir
 
+if os.name == "nt":
+    mod_name = "PurplePuppy-Stamps"
+else:
+    mod_name = "PurplePuppy-Stamps_Linux"
+
 def get_config_path() -> Path:
     """
     Get the path to the configuration file for PurplePuppy Stamps.
@@ -84,7 +89,7 @@ def get_config_path() -> Path:
     base_path = get_base_path()
 
     # Navigate up until we reach 'GDWeave'
-    while base_path.name in ["mods", "PurplePuppy-Stamps"]:
+    while base_path.name in ["mods", mod_name]:
         base_path = base_path.parent
 
     # Ensure the resolved base path is correct
