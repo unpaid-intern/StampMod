@@ -84,7 +84,7 @@ got ctrl z to function and changed keybinds
 # future updates will be slow and may not happen at all, but could include:
 - longer multiframe support
 - canvasAPI for modders if eli doesnt just make one himself lol (sorry)
-- separate mod for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
+- separate mod "webpaint" for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
 - canvas locking for hosts
 - better organised save menu
 - more stamps off-canvas
