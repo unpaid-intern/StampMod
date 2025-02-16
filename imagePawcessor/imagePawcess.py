@@ -169,7 +169,6 @@ has_chalks = False
 chalks_colors = False
 first = False
 brightness = 0.5
-
 # Get font image
 font_path = exe_path_fs('imagePawcessor/font.png')
 with Image.open(font_path) as im:
@@ -179,35 +178,60 @@ with Image.open(font_path) as im:
     font_arr = np.array(im.convert("L"), dtype=np.uint8) > 128
 
 def create_image(text: str, line_width: int, text_color: tuple[int, int, int], background_color: tuple[int, int, int]):
+    out_path = exe_path_fs('imagePawcessor/temp/text.png')
     text = text.strip()
-    if not len(text):
-        return Image.new((1, 1), "RGBA")
-    lines = text.replace("\r", "").replace("\t", "  ")
-    lines = textwrap.wrap(lines, line_width)
+    if not text:
+        img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        img.save(out_path)
+        return str(out_path)
+
+    lines = textwrap.wrap(text, line_width)
     text_height = len(lines)
     pixel_width = (glyph_width + 1) * (line_width - 1) + glyph_width
     pixel_height = (glyph_height + 1) * (text_height - 1) + glyph_height
-    image = np.zeros((pixel_height, pixel_width), dtype=np.bool_)
+    image = np.zeros((pixel_height, pixel_width), dtype=bool)
+
     for y, line in enumerate(lines):
         img_y = y * (glyph_height + 1)
         for x, char in enumerate(line):
             img_x = x * (glyph_width + 1)
-            
             char_idx = ord(char)
-            if char_idx not in range(0x20, 0x7F):
+            if not (0x20 <= char_idx < 0x7F):
                 char_idx = ord("?")
-            
             char_idx -= 0x20
             char_x = (char_idx % 16) * (glyph_width + 1) + 1
             char_y = (char_idx // 16) * (glyph_height + 1) + 1
-            image[img_y : img_y + glyph_height, img_x : img_x + glyph_width] \
-                = font_arr[char_y : char_y + glyph_height, char_x : char_x + glyph_width]
-    
-    colored_arr = np.empty((pixel_height, pixel_width, 3), dtype=np.uint8)
-    colored_arr[image] = text_color
-    colored_arr[~image] = background_color
-    Image.fromarray(colored_arr).show()
-    return colored_arr
+            image[img_y:img_y + glyph_height, img_x:img_x + glyph_width] = \
+                font_arr[char_y:char_y + glyph_height, char_x:char_x + glyph_width]
+
+    coords = np.argwhere(image)
+    if coords.size == 0:
+        img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        img.save(out_path)
+        return str(out_path)
+
+    min_y, min_x = coords.min(axis=0)
+    max_y, max_x = coords.max(axis=0)
+    cropped_height = max_y - min_y + 1
+    cropped_width = max_x - min_x + 1
+    sub_image = image[min_y:max_y + 1, min_x:max_x + 1]
+
+    def to_rgba(c):
+        if c == (0, 0, 0):
+            return (0, 0, 0, 0)
+        return (c[0], c[1], c[2], 255)
+
+    text_rgba = to_rgba(text_color)
+    bg_rgba = to_rgba(background_color)
+
+    colored_arr = np.zeros((cropped_height, cropped_width, 4), dtype=np.uint8)
+    colored_arr[:] = bg_rgba
+    colored_arr[sub_image] = text_rgba
+
+    final_img = Image.fromarray(colored_arr, "RGBA")
+    final_img.save(out_path)
+    return str(out_path)
+
 
 def get_clipboard_image_via_pyside6():
     """
@@ -3933,6 +3957,7 @@ class MainWindow(QMainWindow):
             "Gnarp gnap",
             "all roads lead deeper into the woods",
             "numba based optimizations by baltdev",
+            "Text write courtesy baltdev",
             "Would you like to sign my petition?",
             "Guns don't kill. I do"
         ]
@@ -4393,27 +4418,29 @@ class MainWindow(QMainWindow):
         webbrowser.open("https://github.com/unpaid-intern/StampMod/?tab=readme-ov-file#keybinds")
 
     def write_text_ui(self):
-        """
-        Shows the UI for writing text as an image.
-        """
         if self.processing:
             return
 
         if not hasattr(self, 'write_text_widget'):
             self.setup_text_menu()
-            
+
+        self.text_edit_widget.clear()
+        self.color_dropdown.setCurrentText("White")
+        self.bgcolor_dropdown.setCurrentText("Transparent")
+        self.line_width_slider.setValue(25)
+        self.line_width_value_label.setText("25")
+        self.text_preview_label.clear()
+        self.generate_text_image()
+
         self.stacked_widget.setCurrentWidget(self.write_text_widget)
-    
+
     def setup_text_menu(self):
-        """
-        Sets up the UI for writing text as an image.
-        """
         self.write_text_widget = QWidget()
         self.write_text_widget.setStyleSheet("background-color: #1E1A33;")
-        layout = QVBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        self.write_text_widget.setLayout(layout)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        self.write_text_widget.setLayout(main_layout)
 
         home_button = HoverButton(
             exe_path_str("imagePawcessor/font_stuff/home.svg"),
@@ -4423,34 +4450,52 @@ class MainWindow(QMainWindow):
         home_button.move(16, 16)
         home_button.setIconSize(QSize(72, 72))
         home_button.clicked.connect(self.go_to_initial_menu)
-        layout.addWidget(home_button, alignment=Qt.AlignTop)
+        main_layout.addWidget(home_button, alignment=Qt.AlignTop)
 
+        # Use a unique label name here so it won't conflict with the main menu's self.image_label
+        self.text_preview_label = QLabel()
+        self.text_preview_label.setFixedSize(600, 250)
+        self.text_preview_label.setStyleSheet("background: none;")
+        self.text_preview_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.text_preview_label, alignment=Qt.AlignCenter)
 
-        tedit_parent = QVBoxLayout()
-        tedit_parent.setSpacing(10)
+        controls_layout = QVBoxLayout()
+        controls_layout.setSpacing(10)
 
-        dropdown_parent = QHBoxLayout()
-        dropdown_parent.setSpacing(10)
+        text_color_layout = QHBoxLayout()
+        text_color_layout.addWidget(QLabel("Text Color:"))
+        self.color_dropdown = QComboBox()
+        self.color_dropdown.addItems([color["name"] for color in self.default_color_key_array])
+        self.color_dropdown.addItem("Transparent")
+        self.color_dropdown.addItem("RGB")
+        self.color_dropdown.setStyleSheet(COMBOBOX_STYLESHEET)
+        text_color_layout.addWidget(self.color_dropdown)
+        controls_layout.addLayout(text_color_layout)
 
-        # TODO: Properly add inputs for background color and line width
+        bg_color_layout = QHBoxLayout()
+        bg_color_layout.addWidget(QLabel("Background Color:"))
+        self.bgcolor_dropdown = QComboBox()
+        self.bgcolor_dropdown.addItems([color["name"] for color in self.default_color_key_array])
+        self.bgcolor_dropdown.addItem("Transparent")
+        self.bgcolor_dropdown.addItem("RGB")
+        self.bgcolor_dropdown.setStyleSheet(COMBOBOX_STYLESHEET)
+        bg_color_layout.addWidget(self.bgcolor_dropdown)
+        controls_layout.addLayout(bg_color_layout)
 
-        dropdown_parent.addWidget(QLabel("Text Color:"))
-
-        color_dropdown = QComboBox()
-        color_dropdown.addItems([color["name"] for color in self.default_color_key_array])
-        color_dropdown.setStyleSheet(COMBOBOX_STYLESHEET)
-
-        def change_text_color():
-            nonlocal color_dropdown
-            self.text_color = color_dropdown.currentData()
-
-        color_dropdown.currentTextChanged.connect(change_text_color)
-        dropdown_parent.addWidget(color_dropdown)
-
-        dropdown_widget = QWidget()
-        dropdown_widget.setLayout(dropdown_parent)
-
-        tedit_parent.addWidget(dropdown_widget)
+        line_width_layout = QHBoxLayout()
+        line_width_layout.addWidget(QLabel("Line Width:"))
+        self.line_width_slider = QSlider(Qt.Horizontal)
+        self.line_width_slider.setRange(6, 50)
+        self.line_width_slider.setValue(20)
+        self.line_width_slider.setStyleSheet(COMBOBOX_STYLESHEET)
+        self.line_width_value_label = QLabel(str(self.line_width_slider.value()))
+        self.line_width_value_label.setStyleSheet("color: white;")
+        def update_line_width_label(val):
+            self.line_width_value_label.setText(str(val))
+        self.line_width_slider.valueChanged.connect(update_line_width_label)
+        line_width_layout.addWidget(self.line_width_slider)
+        line_width_layout.addWidget(self.line_width_value_label)
+        controls_layout.addLayout(line_width_layout)
 
         self.text_edit_widget = QPlainTextEdit()
         self.text_edit_widget.setStyleSheet("""
@@ -4464,31 +4509,288 @@ class MainWindow(QMainWindow):
         self.text_edit_widget.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.text_edit_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.text_edit_widget.placeholderText = "Write some text here..."
-        tedit_parent.addWidget(self.text_edit_widget)
+        self.text_edit_widget.setPlaceholderText("Write some text here...")
+        controls_layout.addWidget(self.text_edit_widget)
 
         self.text_submit_button = QPushButton("Load!")
         self.text_submit_button.setStyleSheet(BUTTON_STYLESHEET)
         self.text_submit_button.setMinimumSize(40, 40)
         self.text_submit_button.clicked.connect(self.load_input_text)
-        tedit_parent.addWidget(self.text_submit_button)
+        controls_layout.addWidget(self.text_submit_button)
 
         submit_widget = QWidget()
-        submit_widget.setLayout(tedit_parent)
-
-        layout.addWidget(submit_widget, alignment = Qt.AlignBottom)
+        submit_widget.setLayout(controls_layout)
+        main_layout.addWidget(submit_widget, alignment=Qt.AlignBottom)
 
         self.stacked_widget.addWidget(self.write_text_widget)
 
+        self.text_edit_widget.textChanged.connect(self.generate_text_image)
+        self.color_dropdown.currentIndexChanged.connect(self.generate_text_image)
+        self.bgcolor_dropdown.currentIndexChanged.connect(self.generate_text_image)
+        self.line_width_slider.valueChanged.connect(self.generate_text_image)
+
     def load_input_text(self):
-        image_arr = create_image(
-            self.text_edit_widget.toPlainText(), 
-            # TODO: Make these update
-            line_width = 50,
-            text_color = (0, 0, 0),
-            background_color = (255, 255, 255),
+        text = self.text_edit_widget.toPlainText()
+        if not text.strip():
+            self.show_floating_message("Write Something!")
+            return
+        chosen_text_color = self.color_dropdown.currentText()
+        chosen_bg_color = self.bgcolor_dropdown.currentText()
+        line_width = self.line_width_slider.value()
+
+        if chosen_text_color == "Transparent":
+            text_color = (0, 0, 0)
+        elif chosen_text_color == "RGB":
+            text_color = (255, 0, 255)
+        else:
+            match = [c for c in self.default_color_key_array if c["name"] == chosen_text_color]
+            if match:
+                hex_val = match[0]["hex"]
+                text_color = tuple(int(hex_val[i:i+2], 16) for i in (0, 2, 4))
+            else:
+                text_color = (255, 255, 255)
+
+        if chosen_bg_color == "Transparent":
+            background_color = (0, 0, 0)
+        elif chosen_bg_color == "RGB":
+            background_color = (255, 0, 255)
+        else:
+            match = [c for c in self.default_color_key_array if c["name"] == chosen_bg_color]
+            if match:
+                hex_val = match[0]["hex"]
+                background_color = tuple(int(hex_val[i:i+2], 16) for i in (0, 2, 4))
+            else:
+                background_color = (255, 255, 255)
+
+        png_path = create_image(
+            text=text,
+            line_width=line_width,
+            text_color=text_color,
+            background_color=background_color
         )
-        # TODO: actually load the damn thing
+        self.process_text_to_stamp(png_path)
+        self.show_floating_message("Available in game!")
+
+    def generate_text_image(self):
+        text = self.text_edit_widget.toPlainText()
+        if not text.strip():
+            self.text_preview_label.clear()
+            return
+        chosen_text_color = self.color_dropdown.currentText()
+        chosen_bg_color = self.bgcolor_dropdown.currentText()
+        line_width = self.line_width_slider.value()
+
+        if chosen_text_color == "Transparent":
+            text_color = (0, 0, 0)
+        elif chosen_text_color == "RGB":
+            text_color = (255, 0, 255)
+        else:
+            match = [c for c in self.default_color_key_array if c["name"] == chosen_text_color]
+            if match:
+                hex_val = match[0]["hex"]
+                text_color = tuple(int(hex_val[i:i+2], 16) for i in (0, 2, 4))
+            else:
+                text_color = (255, 255, 255)
+
+        if chosen_bg_color == "Transparent":
+            background_color = (0, 0, 0)
+        elif chosen_bg_color == "RGB":
+            background_color = (255, 0, 255)
+        else:
+            match = [c for c in self.default_color_key_array if c["name"] == chosen_bg_color]
+            if match:
+                hex_val = match[0]["hex"]
+                background_color = tuple(int(hex_val[i:i+2], 16) for i in (0, 2, 4))
+            else:
+                background_color = (255, 255, 255)
+
+        png_path = create_image(
+            text=text,
+            line_width=line_width,
+            text_color=text_color,
+            background_color=background_color
+        )
+        self.update_text_image_display(png_path)
+
+    def update_text_image_display(self, png_path):
+        if not png_path:
+            self.text_preview_label.clear()
+            return
+        pixmap = QPixmap(png_path)
+        scaled_pixmap = pixmap.scaled(600, 250, Qt.KeepAspectRatio, Qt.FastTransformation)
+        self.text_preview_label.setPixmap(scaled_pixmap)
+        self.text_preview_label.update()
+
+
+    def process_text_to_stamp(self, input_png_path):
+        """
+        Processes a PNG image and saves its data in a text file with color mappings.
+        Also manages the preview directory by clearing it and copying the input PNG.
+
+        Parameters:
+            input_png_path (str): The file path to the input PNG image.
+        """
+        # Helper function to convert hex color to RGB tuple
+        def hex_to_rgb(hex_color):
+            hex_color = hex_color.lstrip('#')
+            if len(hex_color) != 6:
+                raise ValueError(f"Invalid hex color: {hex_color}")
+            return tuple(int(hex_color[i:i+2], 16) for i in (0, 2, 4))
+
+        # Helper function to find the closest color number from the color key
+        def find_closest_color(target_rgb, color_key_rgb):
+            min_distance = float('inf')
+            closest_color_num = None
+            for idx, color in enumerate(color_key_rgb):
+                distance = math.sqrt(
+                    (target_rgb[0] - color[0]) ** 2 +
+                    (target_rgb[1] - color[1]) ** 2 +
+                    (target_rgb[2] - color[2]) ** 2
+                )
+                if distance < min_distance:
+                    min_distance = distance
+                    closest_color_num = idx
+            return closest_color_num
+
+        try:
+            # Define color key as per the provided mapping
+            color_key = {
+                0: 'ffe7c5',
+                1: '2a3844',
+                2: 'd70b5d',
+                3: '0db39e',
+                4: 'f4c009',
+                5: 'ff00ff',
+                6: 'bac357',
+                7: 'a3b2d2',
+                8: 'd6cec2',
+                9: 'bfded8',
+                10: 'a9c484',
+                11: '5d937b',
+                12: 'a2a6a9',
+                13: '777f8f',
+                14: 'eab281',
+                15: 'ea7286',
+                16: 'f4a4bf',
+                17: 'a07ca7',
+                18: 'bf796d',
+                19: 'f5d1b6',
+                20: 'e3e19f',
+                21: 'ffdf00',
+                22: 'ffbf00',
+                23: 'c4b454',
+                24: 'f5deb3',
+                25: 'f4c430',
+                26: '00ffff',
+                27: '89cff0',
+                28: '4d4dff',
+                29: '00008b',
+                30: '4169e1',
+                31: '006742',
+                32: '4cbb17',
+                33: '2e6f40',
+                34: '2e8b57',
+                35: 'c0c0c0',
+                36: '818589',
+                37: '899499',
+                38: '708090',
+                39: 'ffa500',
+                40: 'ff8c00',
+                41: 'd7942d',
+                42: 'ff5f1f',
+                43: 'cc7722',
+                44: 'ff69b4',
+                45: 'ff10f0',
+                46: 'aa336a',
+                47: 'f4b4c4',
+                48: '953553',
+                49: 'd8bfd8',
+                50: '7f00ff',
+                51: '800080',
+                52: 'ff2400',
+                53: 'ff4433',
+                54: 'a52a2a',
+                55: '913831',
+                56: 'ff0000',
+                57: '3b2219',
+                58: 'a16e4b',
+                59: 'd4aa78',
+                60: 'e6bc98',
+                61: 'ffe7d1'
+            }
+
+            # Convert hex colors to RGB tuples
+            color_key_rgb = [hex_to_rgb(color_key[i]) for i in range(len(color_key))]
+
+            # Paths
+            preview_dir = exe_path_fs('game_data/stamp_preview/')
+            preview_image_path = os.path.join(preview_dir, 'preview.png')
+            current_stamp_dir = exe_path_fs('game_data/current_stamp_data/')
+            stamp_txt_path = os.path.join(current_stamp_dir, 'stamp.txt')
+
+            # Step 1: Manage Preview Directory
+            if os.path.exists(preview_dir):
+                # Clear the directory
+                shutil.rmtree(preview_dir)
+            # Recreate the directory
+            os.makedirs(preview_dir, exist_ok=True)
+            # Copy the input PNG to the preview directory as 'preview.png'
+            shutil.copyfile(input_png_path, preview_image_path)
+            print(f"Preview directory cleared and '{input_png_path}' copied to '{preview_image_path}'.")
+
+            # Step 2: Process the Image
+            with Image.open(input_png_path) as img:
+                img = img.convert('RGBA')  # Ensure image has an alpha channel
+                width, height = img.size
+                pixels = img.load()
+
+            # Calculate scaled dimensions
+            scaled_width = round(width * 0.1, 1)
+            scaled_height = round(height * 0.1, 1)
+
+            # Ensure the output directory exists
+            os.makedirs(current_stamp_dir, exist_ok=True)
+
+            with open(stamp_txt_path, 'w') as f:
+                # Write the first line with scaled dimensions
+                f.write(f"{scaled_width},{scaled_height},img\n")
+                print(f"Scaled dimensions written: {scaled_width},{scaled_height},img")
+
+                # Iterate through pixels from bottom to top, left to right
+                for y in range(height - 1, -1, -1):
+                    for x in range(width):
+                        pixel = pixels[x, y]
+
+                        # Extract RGBA values
+                        if len(pixel) == 4:
+                            r, g, b, a = pixel
+                        elif len(pixel) == 3:
+                            r, g, b = pixel
+                            a = 255
+                        else:
+                            print(f"Unexpected pixel format at ({x}, {y}): {pixel}")
+                            continue  # Skip unexpected formats
+
+                        # Skip pixels with alpha <= 191
+                        if a <= 191:
+                            continue
+
+                        # Find the closest color number from the color key
+                        closest_color_num = find_closest_color((r, g, b), color_key_rgb)
+
+                        if closest_color_num is None:
+                            print(f"No matching color found for pixel at ({x}, {y}): ({r}, {g}, {b})")
+                            continue  # Skip if no matching color is found
+
+                        # Scale the coordinates
+                        scaled_x = round(x * 0.1, 1)
+                        scaled_y = round((height - 1 - y) * 0.1, 1)
+
+                        # Write to the file
+                        f.write(f"{scaled_x},{scaled_y},{closest_color_num}\n")
+
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
     def setup_save_menu1(self):
         """
