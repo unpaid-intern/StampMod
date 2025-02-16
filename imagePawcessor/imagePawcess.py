@@ -2172,7 +2172,7 @@ def dither_loop(arr, rand_offs, palette, strength):
 @register_processing_method(
     'Random Dither',
     default_params={'strength': 1.0},
-    description="Random dithering with error diffusion. Uncheck \"Use LAB Colors\" if it looks too red!"
+    description="Random dithering with error diffusion. First execution may be slow. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def random_dither(img, color_key, params):
     """
@@ -2290,7 +2290,7 @@ def floyd_steinberg_dithering(img, color_key, params):
 @register_processing_method(
     'Sierra Dither',
     default_params={'strength': 1.0},
-    description="A Sierra variant that provides smooth gradients with less computational complexity. Uncheck \"Use LAB Colors\" if it looks too red!"
+    description="Idk what to say about this one lol. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def sierra2_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
