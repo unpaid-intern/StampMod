@@ -1632,7 +1632,7 @@ def build_color_key(color_key_array):
 @register_processing_method(
     'Color Match',
     default_params={},
-    description="Maps each pixel to the closest color of chalk. Basic, consistent, and reliable."
+    description="Maps each pixel to the closest color of chalk. Basic, consistent, and reliable. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def color_matching(img, color_key, params):
     img_array = np.array(img)
@@ -1658,7 +1658,7 @@ def color_matching(img, color_key, params):
 @register_processing_method(
     'K-Means Mapping',
     default_params={'Clusters': 12},
-    description="Simplify complex images to be less noisy! Use slider to adjust the amount of color groups. Great for limited palette."
+    description="Simplify complex images to be less noisy! Use slider to adjust the amount of color groups. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def simple_k_means_palette_mapping(img, color_key, params):
     has_alpha = (img.mode == 'RGBA')
@@ -1863,7 +1863,7 @@ def hybrid_dither_numba(img_array, saliency_array, alpha_mask, palette_rgb, pale
 @register_processing_method(
     'Hybrid Dither',
     default_params={'strength': 1.0},
-    description="Switches between Atkinson and Floyd dithering based on texture."
+    description="Switches between Atkinson and Floyd dithering based on texture. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def hybrid_dithering(img, color_key, params):
     global use_lab
@@ -1944,7 +1944,7 @@ def hybrid_dithering(img, color_key, params):
 @register_processing_method(
     'Pattern Dither',
     default_params={'strength': 0.33},
-    description="Uses an 8x8 Bayer matrix to apply dithering in a pattern. Pretty :3"
+    description="Uses an 8x8 Bayer matrix to apply dithering in a pattern. Pretty! Uncheck \"Use LAB Colors\" if it looks too red :3"
 )
 def ordered_dithering(img, color_key, params):
     global use_lab
@@ -2172,7 +2172,7 @@ def dither_loop(arr, rand_offs, palette, strength):
 @register_processing_method(
     'Random Dither',
     default_params={'strength': 1.0},
-    description="Random dithering with error diffusion."
+    description="Random dithering with error diffusion. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def random_dither(img, color_key, params):
     """
@@ -2229,7 +2229,7 @@ def random_dither(img, color_key, params):
 @register_processing_method(
     'Atkinson Dither',
     default_params={'strength': 1.0},
-    description="Dithering suited for smaller images! Used by the Macintosh for monochrome displays."
+    description="Dithering suited for smaller images! Used by the Macintosh for monochrome displays. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def atkinson_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2244,7 +2244,7 @@ def atkinson_dithering(img, color_key, params):
 @register_processing_method(
     'Jarvis Dither',
     default_params={'strength': 1.0},
-    description="Applies diffusion over a large area. Best used for images with size over ~120."
+    description="Applies diffusion over a large area. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def jarvis_judice_ninke_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2259,7 +2259,7 @@ def jarvis_judice_ninke_dithering(img, color_key, params):
 @register_processing_method(
     'Stucki Dither',
     default_params={'strength': 1.0},
-    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results."
+    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def stucki_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2274,7 +2274,7 @@ def stucki_dithering(img, color_key, params):
 @register_processing_method(
     'Floyd Dither',
     default_params={'strength': 1.0},
-    description="Create smooth gradients using diffusion. Best used for images with size over ~120."
+    description="Create smooth gradients using diffusion. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def floyd_steinberg_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2290,7 +2290,7 @@ def floyd_steinberg_dithering(img, color_key, params):
 @register_processing_method(
     'Sierra Dither',
     default_params={'strength': 1.0},
-    description="A Sierra variant that provides smooth gradients with less computational complexity."
+    description="A Sierra variant that provides smooth gradients with less computational complexity. Uncheck \"Use LAB Colors\" if it looks too red!"
 )
 def sierra2_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
