@@ -2301,8 +2301,6 @@ def sierra2_dithering(img, color_key, params):
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
 
-
-
 def process_image(img, color_key, process_mode, process_params):
     """
     Dispatches image processing to the appropriate method based on process_mode.

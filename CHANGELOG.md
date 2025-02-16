@@ -77,12 +77,15 @@ got ctrl z to function and changed keybinds
 # 2.2.8
 - video support (mp4 only currently)
 - uses nearest neighbor for upscaling
+# 2.3.0
+- added webm support.
+- fixed video preview bugs
+- awesome text write feature by baltdev
 # future updates will be slow and may not happen at all, but could include:
 - longer multiframe support
 - canvasAPI for modders if eli doesnt just make one himself lol (sorry)
 - separate mod for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
 - canvas locking for hosts
 - better organised save menu
-- improved ctrl z logic
-- more stamps off-canvas (especially for hosts)
-> in that order, at which point i think im happy to move on to other projects outside of webfishing. i wanted to make something cool and i did!
+- more stamps off-canvas
+> in that order, at which point i think im happy to move on to other projects outside of webfishing.
