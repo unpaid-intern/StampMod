@@ -102,7 +102,6 @@ func _process(delta):
 			
 
 func set_chalks():
-	# Check if the 'chalks' node exists and set the config accordingly
 	if !chalks:
 		chalks = false
 	else:
@@ -324,7 +323,7 @@ func check_updates():
 	var file = File.new()
 
 	while true:
-		yield (get_tree().create_timer(2.6), "timeout")
+		yield (get_tree().create_timer(1), "timeout")
 		
 		if !stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
 			stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods = get_node_or_null("/root/officerballsthetambourine")

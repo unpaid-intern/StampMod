@@ -3,8 +3,8 @@ extends Spatial
 onready var _PlayerData = get_node_or_null("/root/PlayerData")
 onready var _OptionsMenu = get_node_or_null("/root/OptionsMenu")
 onready var _Network = get_node_or_null("/root/Network")
-onready var ray_detector_scene = preload("res://mods/PurplePuppy-Stamps/RayDetector.tscn")
 onready var key_handler = get_tree().get_nodes_in_group("keys")[0]
+onready var canvas_handler = get_tree().get_nodes_in_group("canvasSpawner")[0]
 var _keybinds_api = null
 var cam = null
 var ctrlz_array = []
@@ -91,7 +91,6 @@ func _ready():
 	key_handler.connect("_delete", self, "_delete")
 	key_handler.connect("get_data", self, "get_data")
 	_PlayerData.connect("_chalk_update", self, "_chalk_update")
-	ray_detector = ray_detector_scene.instance()
 	
 
 func re_ready():
@@ -248,7 +247,7 @@ func is_in_any_grid(pos: Vector3)->bool:
 			return true
 	return false
 
-func _spawn_canvas(pos, file_path, _offset = 10):
+func _spawn_canvas(pos, file_path, _offset):
 	if current_zone == "main_zone":
 		if (pos.x > 48.571999 - 10 and pos.x < 48.571999 + 10) and (pos.z > - 51.041 - 10 and pos.z < - 51.041 + 10):
 			grid = 1
@@ -263,11 +262,7 @@ func _spawn_canvas(pos, file_path, _offset = 10):
 	else:
 		grid = 0
 	
-	if grid == 0 && key_handler.stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
-			PlayerData._send_notification("feature incompatable with \"thetamborine\" mod", 1)
-			PlayerData._send_notification("please uninstall it if you wish to place off-canvas", 1)
-			return false
-		
+
 	var offsets = []
 	if two and grid == 0:
 		shoulddel = true

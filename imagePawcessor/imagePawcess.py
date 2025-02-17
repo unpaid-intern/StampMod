@@ -139,7 +139,7 @@ def get_config_path() -> Path:
     base_path = get_base_path()
 
     # Navigate up until we reach 'GDWeave'
-    while base_path.name in ["mods", mod_name, "dist", "imagePawcessor"]:
+    while base_path.name in ["mods", "PurplePuppy-Stamps"]:
         base_path = base_path.parent
 
     # Ensure the resolved base path is correct
@@ -466,7 +466,7 @@ def apply_clahe(
     clahe_clip_limit=3.0,
     clahe_grid_size=8,
     gamma=0.9,
-    color_boost=1.8,
+    color_boost=1.5,
     range_min=10,
     range_max=245,
 ):
@@ -1206,43 +1206,62 @@ def resize_image(img, target_size):
         raise RuntimeError(f"Failed to resize the image: {e}")
 
 
+@njit(parallel=True, cache=True)
+def _brightness_kernel(data, brightness):
+    """
+    Numba-accelerated routine for adjusting brightness in-place on a float32 array.
+    data: float32 array of shape (H, W, C) where C=3 (RGB) or 4 (RGBA).
+    brightness: float in [-0.5, 1.5].
+    Returns a new float32 array with brightness adjusted.
+    """
+    h, w, ch = data.shape
+    new_data = np.empty_like(data)
+
+    # Precompute factor(s) outside the loops, so we don't do it per pixel.
+    if brightness < 0.5:
+        # Darkening phase
+        # brightness in [-0.5..0.5] => factor in [0..~0.95]
+        factor = 0.95 * (brightness + 0.5)  # old formula
+        if factor < 0.0:
+            factor = 0.0  # total black if brightness <= -0.5
+        for y in prange(h):
+            for x in range(w):
+                for c in range(ch):
+                    if c == 3:  # alpha channel
+                        new_data[y, x, c] = data[y, x, c]
+                    else:
+                        new_data[y, x, c] = data[y, x, c] * factor
+
+    else:
+        # Brightening phase
+        # brightness in [0.5..1.5] => factor in [0..1]
+        factor = brightness - 0.5
+        if factor > 1.0:
+            factor = 1.0  # fully white if brightness >= 1.5
+        inv_factor = 1.0 - factor
+
+        for y in prange(h):
+            for x in range(w):
+                for c in range(ch):
+                    if c == 3:  # alpha channel
+                        new_data[y, x, c] = data[y, x, c]
+                    else:
+                        # blend original with white
+                        val = data[y, x, c]
+                        new_data[y, x, c] = inv_factor * val + factor * 255.0
+
+    return new_data
 
 def adjust_brightness(image, brightness):
     """
-    Adjusts the brightness of a PIL image in the RGB space.
-
-    The brightness parameter should range from -0.5 to 1.5, where:
-      - brightness = -0.5 yields a completely black image,
-      - brightness = 0.5 yields no change, and
-      - brightness = 1.5 yields a completely white image.
-      
-    For brightness values below 0.5, the image is darkened by multiplying
-    all pixel values by a factor; for brightness values above 0.5, the image is 
-    brightened by linearly blending the original image with white.
-
-    :param image: A PIL.Image instance.
-    :param brightness: A float in the range [-0.5, 1.5].
-    :return: A new PIL.Image with adjusted brightness.
+    Adjusts the brightness of a PIL image in the RGB(A) space.
+    brightness: float in [-0.5, 1.5].
+    Returns a new PIL.Image with adjusted brightness.
     """
-    # Convert the PIL image to a NumPy array of type float32 for processing.
     arr = np.array(image).astype(np.float32)
-    
-    if brightness < 0.5:
-        # For darkening: map brightness from [-0.5, 0.5] to a scale factor [0, 1].
-        # At brightness = -0.5, factor = 0 (black); at brightness = 0.5, factor = 1 (no change).
-        factor = (brightness + 0.5)  # This is linear: e.g., brightness=0.25 gives factor=0.75.
-        new_arr = factor * arr
-    else:
-        # For brightening: map brightness from [0.5, 1.5] to a blend factor [0, 1].
-        # At brightness = 0.5, factor = 0 (no change); at brightness = 1.5, factor = 1 (white).
-        factor = (brightness - 0.5)  # For example, brightness=1.0 gives factor=0.5.
-        new_arr = (1 - factor) * arr + factor * 255
-
-    # Ensure values are within the valid range and convert back to uint8.
-    new_arr = np.clip(new_arr, 0, 255).astype(np.uint8)
-    
-    # Convert the NumPy array back to a PIL Image and return it.
-    return Image.fromarray(new_arr)
+    out_arr = _brightness_kernel(arr, brightness)
+    out_arr = np.clip(out_arr, 0, 255).astype(np.uint8)
+    return Image.fromarray(out_arr, image.mode)
 
 
 
@@ -1632,7 +1651,7 @@ def build_color_key(color_key_array):
 @register_processing_method(
     'Color Match',
     default_params={},
-    description="Maps each pixel to the closest color of chalk. Basic, consistent, and reliable. Uncheck \"Use LAB Colors\" if it looks too red!"
+    description="Maps each pixel to the closest color of chalk. Basic, consistent, and reliable. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def color_matching(img, color_key, params):
     img_array = np.array(img)
@@ -1656,9 +1675,206 @@ def color_matching(img, color_key, params):
 
 
 @register_processing_method(
+    'Pattern Dither',
+    default_params={'strength': 1.00},
+    description="Uses an 8x8 Bayer matrix to apply dithering in a pattern with smooth gradients. Pretty! Uncheck \"Use LAB Colors\" if the colors seem off :3"
+)
+def ordered_dithering(img, color_key, params):
+    global use_lab
+    import numpy as np
+    from numba import njit, prange
+    from PIL import Image
+
+    strength = params.get('strength', 1.0)
+    # You can tweak this multiplier if you want a different overall effect
+    max_adjustment_factor = 0.3 * strength
+
+    # 8x8 Bayer matrix
+    bayer_8x8 = np.array([
+        [0, 32, 8, 40, 2, 34, 10, 42],
+        [48, 16, 56, 24, 50, 18, 58, 26],
+        [12, 44, 4, 36, 14, 46, 6, 38],
+        [60, 28, 52, 20, 62, 30, 54, 22],
+        [3, 35, 11, 43, 1, 33, 9, 41],
+        [51, 19, 59, 27, 49, 17, 57, 25],
+        [15, 47, 7, 39, 13, 45, 5, 37],
+        [63, 31, 55, 23, 61, 29, 53, 21]
+    ], dtype=np.float32) / 64.0
+
+    # Copy the image to avoid in-place modifications
+    img = img.copy()
+    img_array = np.array(img, dtype=np.uint8)
+    has_alpha = (img.mode == 'RGBA')
+    if has_alpha:
+        alpha_channel = img_array[:, :, 3]
+        alpha_mask = alpha_channel > 0
+    else:
+        alpha_mask = np.ones((img_array.shape[0], img_array.shape[1]), dtype=bool)
+
+    height, width = img_array.shape[:2]
+
+    # Build palette
+    palette_rgb = np.array(list(color_key.values()), dtype=np.uint8)
+
+    # Optionally use LAB
+    if use_lab:
+        n_palette = palette_rgb.shape[0]
+        palette_lab = np.empty((n_palette, 3), dtype=np.float32)
+        for i in range(n_palette):
+            r, g, b = palette_rgb[i]
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            palette_lab[i, 0] = L
+            palette_lab[i, 1] = a_val
+            palette_lab[i, 2] = b_val
+    else:
+        palette_lab = np.empty((0, 3), dtype=np.float32)
+
+    # Tile the Bayer matrix
+    tiled_bayer = np.tile(bayer_8x8, (height // 8 + 1, width // 8 + 1))
+    tiled_bayer = tiled_bayer[:height, :width].astype(np.float32)
+
+    @njit(parallel=True, cache=True)
+    def ordered_dithering_rgb(image, alpha_mask, tiled_bayer, max_adjustment, palette_rgb):
+        h, w = image.shape[:2]
+        n_palette = palette_rgb.shape[0]
+
+        for y in prange(h):
+            for x in range(w):
+                if not alpha_mask[y, x]:
+                    continue
+
+                r = image[y, x, 0]
+                g = image[y, x, 1]
+                b = image[y, x, 2]
+                brightness = (r + g + b) / 765.0  # ~ [0..1], 765 = 3*255
+                threshold = tiled_bayer[y, x]
+
+                # Instead of a binary factor, use a continuous factor
+                # difference from threshold in [-1..1]
+                diff = brightness - threshold
+                # If diff > 0, we want to brighten; if diff < 0, we want to darken.
+                # scale factor in [1 - max_adj, 1 + max_adj] proportionally to diff
+                factor = 1.0 + (2.0 * diff * max_adjustment)
+                # clamp factor
+                low_bound = 1.0 - max_adjustment
+                high_bound = 1.0 + max_adjustment
+                if factor < low_bound:
+                    factor = low_bound
+                elif factor > high_bound:
+                    factor = high_bound
+
+                r_adj = max(0, min(r * factor, 255))
+                g_adj = max(0, min(g * factor, 255))
+                b_adj = max(0, min(b * factor, 255))
+
+                # Map to nearest palette color
+                best_idx = 0
+                best_dist = 1e10
+                for i in range(n_palette):
+                    dr = r_adj - palette_rgb[i, 0]
+                    dg = g_adj - palette_rgb[i, 1]
+                    db = b_adj - palette_rgb[i, 2]
+                    dist = dr*dr + dg*dg + db*db
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx = i
+
+                image[y, x, 0] = palette_rgb[best_idx, 0]
+                image[y, x, 1] = palette_rgb[best_idx, 1]
+                image[y, x, 2] = palette_rgb[best_idx, 2]
+
+    @njit(parallel=True, cache=True)
+    def ordered_dithering_lab(image, alpha_mask, tiled_bayer, max_adjustment, palette_rgb, palette_lab):
+        h, w = image.shape[:2]
+        n_palette = palette_rgb.shape[0]
+
+        for y in prange(h):
+            for x in range(w):
+                if not alpha_mask[y, x]:
+                    continue
+                r = image[y, x, 0]
+                g = image[y, x, 1]
+                b = image[y, x, 2]
+                L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+                
+                # Convert L to [0..1] range
+                L_norm = L / 255.0
+                threshold = tiled_bayer[y, x]
+
+                diff = L_norm - threshold
+                # continuous factor
+                factor = 1.0 + (2.0 * diff * max_adjustment)
+                # clamp factor
+                low_bound = 1.0 - max_adjustment
+                high_bound = 1.0 + max_adjustment
+                if factor < low_bound:
+                    factor = low_bound
+                elif factor > high_bound:
+                    factor = high_bound
+
+                L_new = L_norm * factor
+                # clamp to [0..1]
+                if L_new < 0.0:
+                    L_new = 0.0
+                elif L_new > 1.0:
+                    L_new = 1.0
+
+                L_new *= 255.0  # back to [0..255] range
+
+                # Find nearest color in LAB space
+                best_idx = 0
+                best_dist = 1e10
+                for i in range(n_palette):
+                    dL = L_new - palette_lab[i, 0]
+                    da = a_val - palette_lab[i, 1]
+                    db = b_val - palette_lab[i, 2]
+                    dist = dL*dL + da*da + db*db
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_idx = i
+
+                image[y, x, 0] = palette_rgb[best_idx, 0]
+                image[y, x, 1] = palette_rgb[best_idx, 1]
+                image[y, x, 2] = palette_rgb[best_idx, 2]
+
+    # Work on a float32 copy for dithering
+    proc_img = img_array.astype(np.float32)
+
+    if use_lab and palette_lab.shape[0] > 0:
+        ordered_dithering_lab(
+            proc_img, 
+            alpha_mask, 
+            tiled_bayer, 
+            max_adjustment_factor, 
+            palette_rgb.astype(np.float32), 
+            palette_lab
+        )
+    else:
+        ordered_dithering_rgb(
+            proc_img, 
+            alpha_mask, 
+            tiled_bayer, 
+            max_adjustment_factor, 
+            palette_rgb.astype(np.float32)
+        )
+
+    # Clip and convert back
+    proc_img = np.clip(proc_img, 0, 255).astype(np.uint8)
+
+    if has_alpha:
+        img_array[:, :, :3] = proc_img[:, :, :3]
+        result_img = Image.fromarray(img_array, 'RGBA')
+    else:
+        result_img = Image.fromarray(proc_img[:, :, :3], 'RGB')
+
+    return result_img
+
+
+
+@register_processing_method(
     'K-Means Mapping',
     default_params={'Clusters': 12},
-    description="Simplify complex images to be less noisy! Use slider to adjust the amount of color groups. Uncheck \"Use LAB Colors\" if it looks too red!"
+    description="Simplify complex images to be less noisy! Use slider to adjust the amount of color groups. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def simple_k_means_palette_mapping(img, color_key, params):
     has_alpha = (img.mode == 'RGBA')
@@ -1862,8 +2078,8 @@ def hybrid_dither_numba(img_array, saliency_array, alpha_mask, palette_rgb, pale
 # ---------------------------------------------------------------------------
 @register_processing_method(
     'Hybrid Dither',
-    default_params={'strength': 1.0},
-    description="Switches between Atkinson and Floyd dithering based on texture. Uncheck \"Use LAB Colors\" if it looks too red!"
+    default_params={'strength': 0.6},
+    description="Switches between Atkinson and Floyd dithering based on texture. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def hybrid_dithering(img, color_key, params):
     global use_lab
@@ -1939,150 +2155,6 @@ def hybrid_dithering(img, color_key, params):
     
     return result_img
 
-
-
-@register_processing_method(
-    'Pattern Dither',
-    default_params={'strength': 0.33},
-    description="Uses an 8x8 Bayer matrix to apply dithering in a pattern. Pretty! Uncheck \"Use LAB Colors\" if it looks too red :3"
-)
-def ordered_dithering(img, color_key, params):
-    global use_lab
-    strength = params.get('strength', 1.0)
-    adjustment_factor = 0.3 * strength
-
-    # 8x8 Bayer matrix
-    bayer_8x8 = np.array([
-        [0, 32, 8, 40, 2, 34, 10, 42],
-        [48, 16, 56, 24, 50, 18, 58, 26],
-        [12, 44, 4, 36, 14, 46, 6, 38],
-        [60, 28, 52, 20, 62, 30, 54, 22],
-        [3, 35, 11, 43, 1, 33, 9, 41],
-        [51, 19, 59, 27, 49, 17, 57, 25],
-        [15, 47, 7, 39, 13, 45, 5, 37],
-        [63, 31, 55, 23, 61, 29, 53, 21]
-    ], dtype=np.float32) / 64.0
-
-    img = img.copy()
-    img_array = np.array(img, dtype=np.uint8)
-    has_alpha = (img.mode == 'RGBA')
-    if has_alpha:
-        alpha_channel = img_array[:, :, 3]
-        alpha_mask = alpha_channel > 0
-    else:
-        alpha_mask = np.ones((img_array.shape[0], img_array.shape[1]), dtype=np.bool_)
-
-    height, width = img_array.shape[:2]
-
-    # Build palette
-    palette_rgb = np.array(list(color_key.values()), dtype=np.uint8)
-    if use_lab:
-        n_palette = palette_rgb.shape[0]
-        palette_lab = np.empty((n_palette, 3), dtype=np.float32)
-        for i in range(n_palette):
-            r, g, b = palette_rgb[i]
-            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
-            palette_lab[i, 0] = L
-            palette_lab[i, 1] = a_val
-            palette_lab[i, 2] = b_val
-    else:
-        palette_lab = np.empty((0, 3), dtype=np.float32)
-
-    # Tile the Bayer matrix
-    tiled_bayer = np.tile(bayer_8x8, (height // 8 + 1, width // 8 + 1))
-    tiled_bayer = tiled_bayer[:height, :width].astype(np.float32)
-
-    # We'll separate into two specialized routines for clarity
-    @njit(parallel=True, cache=True)
-    def ordered_dithering_rgb(image, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb):
-        h, w = image.shape[:2]
-        n_palette = palette_rgb.shape[0]
-        for y in prange(h):
-            for x in range(w):
-                if not alpha_mask[y, x]:
-                    continue
-                r = image[y, x, 0]
-                g = image[y, x, 1]
-                b = image[y, x, 2]
-                brightness = (r + g + b) / 765.0
-                threshold = tiled_bayer[y, x]
-                if brightness < threshold:
-                    factor = 1.0 - adjustment_factor
-                else:
-                    factor = 1.0 + adjustment_factor
-
-                r_adj = max(0, min(r * factor, 255))
-                g_adj = max(0, min(g * factor, 255))
-                b_adj = max(0, min(b * factor, 255))
-
-                best_idx = 0
-                best_dist = 1e10
-                for i in range(n_palette):
-                    dr = r_adj - palette_rgb[i, 0]
-                    dg = g_adj - palette_rgb[i, 1]
-                    db = b_adj - palette_rgb[i, 2]
-                    dist = dr*dr + dg*dg + db*db
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_idx = i
-
-                image[y, x, 0] = palette_rgb[best_idx, 0]
-                image[y, x, 1] = palette_rgb[best_idx, 1]
-                image[y, x, 2] = palette_rgb[best_idx, 2]
-
-    @njit(parallel=True, cache=True)
-    def ordered_dithering_lab(image, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb, palette_lab):
-        h, w = image.shape[:2]
-        n_palette = palette_rgb.shape[0]
-        for y in prange(h):
-            for x in range(w):
-                if not alpha_mask[y, x]:
-                    continue
-                r = image[y, x, 0]
-                g = image[y, x, 1]
-                b = image[y, x, 2]
-                L, a_val, b_val = rgb_to_lab_numba(r, g, b)
-                L_norm = L / 255.0
-                threshold = tiled_bayer[y, x]
-                if L_norm < threshold:
-                    L_adj = L_norm - adjustment_factor
-                    if L_adj < 0.0:
-                        L_adj = 0.0
-                else:
-                    L_adj = L_norm + adjustment_factor
-                    if L_adj > 1.0:
-                        L_adj = 1.0
-                L_new = L_adj * 255.0
-
-                best_idx = 0
-                best_dist = 1e10
-                for i in range(n_palette):
-                    dL = L_new - palette_lab[i, 0]
-                    da = a_val - palette_lab[i, 1]
-                    db = b_val - palette_lab[i, 2]
-                    dist = dL*dL + da*da + db*db
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_idx = i
-
-                image[y, x, 0] = palette_rgb[best_idx, 0]
-                image[y, x, 1] = palette_rgb[best_idx, 1]
-                image[y, x, 2] = palette_rgb[best_idx, 2]
-
-    proc_img = img_array.astype(np.float32)
-    if use_lab and palette_lab.shape[0] > 0:
-        ordered_dithering_lab(proc_img, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb.astype(np.float32), palette_lab)
-    else:
-        ordered_dithering_rgb(proc_img, alpha_mask, tiled_bayer, adjustment_factor, palette_rgb.astype(np.float32))
-
-    proc_img = np.clip(proc_img, 0, 255).astype(np.uint8)
-    if has_alpha:
-        img_array[:, :, :3] = proc_img[:, :, :3]
-        result_img = Image.fromarray(img_array, 'RGBA')
-    else:
-        result_img = Image.fromarray(proc_img[:, :, :3], 'RGB')
-
-    return result_img
 
 
 
@@ -2166,70 +2238,11 @@ def dither_loop(arr, rand_offs, palette, strength):
                     elif arr[ny, nx, c] > 255:
                         arr[ny, nx, c] = 255
 
-##############################################################################
-# 3) The high-level function your code calls
-##############################################################################
-@register_processing_method(
-    'Random Dither',
-    default_params={'strength': 1.0},
-    description="Random dithering with error diffusion. First execution may be slow. Uncheck \"Use LAB Colors\" if it looks too red!"
-)
-def random_dither(img, color_key, params):
-    """
-    A random dithering algorithm with error diffusion, accelerated by Numba.
-    Single param: 'strength' (float). Produces more interesting, varied 
-    results than simple color matching.
-
-    Args:
-        img (PIL.Image.Image): Input image, mode RGB or RGBA.
-        color_key (dict): e.g. {0:(R,G,B), 1:(R,G,B), ...} palette 
-        params (dict): Contains 'strength' (float).
-
-    Returns:
-        PIL.Image.Image: Dithered image (same mode as input).
-    """
-    strength = params.get('strength', 1.0)
-
-    # Convert color_key (dict) -> array of shape (N,3)
-    color_array = np.array(list(color_key.values()), dtype=np.float32)
-
-    # Separate alpha if needed
-    has_alpha = (img.mode == 'RGBA')
-    img = img.copy()
-    if has_alpha:
-        rgba_data = np.array(img, dtype=np.float32)
-        alpha_channel = rgba_data[:, :, 3].copy()  # preserve alpha
-        work_array = rgba_data[:, :, :3]           # just the RGB
-    else:
-        work_array = np.array(img, dtype=np.float32)
-
-    h, w = work_array.shape[:2]
-
-    # Precompute random offsets in Python (Numba's random is limited)
-    amplitude = 30.0 * strength
-    # shape (h, w, 3) each in [-amplitude, amplitude]
-    random_offsets = (2.0 * np.random.rand(h, w, 3) - 1.0) * amplitude
-
-    # Run dithering
-    dither_loop(work_array, random_offsets.astype(np.float32), color_array, strength)
-
-    # Convert to uint8
-    work_array = np.clip(work_array, 0, 255).astype(np.uint8)
-
-    # Reattach alpha if needed
-    if has_alpha:
-        final_data = np.dstack((work_array, alpha_channel.astype(np.uint8)))
-        result_img = Image.fromarray(final_data, mode='RGBA')
-    else:
-        result_img = Image.fromarray(work_array, mode='RGB')
-
-    return result_img
-
 
 @register_processing_method(
     'Atkinson Dither',
-    default_params={'strength': 1.0},
-    description="Dithering suited for smaller images! Used by the Macintosh for monochrome displays. Uncheck \"Use LAB Colors\" if it looks too red!"
+    default_params={'strength': 0.6},
+    description="Dithering suited for smaller images! Used by the Macintosh for monochrome displays. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def atkinson_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2243,8 +2256,8 @@ def atkinson_dithering(img, color_key, params):
 
 @register_processing_method(
     'Jarvis Dither',
-    default_params={'strength': 1.0},
-    description="Applies diffusion over a large area. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if it looks too red!"
+    default_params={'strength': 0.6},
+    description="Applies diffusion over a large area. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def jarvis_judice_ninke_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2258,8 +2271,8 @@ def jarvis_judice_ninke_dithering(img, color_key, params):
 
 @register_processing_method(
     'Stucki Dither',
-    default_params={'strength': 1.0},
-    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results. Uncheck \"Use LAB Colors\" if it looks too red!"
+    default_params={'strength': 0.6},
+    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def stucki_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2273,8 +2286,8 @@ def stucki_dithering(img, color_key, params):
 
 @register_processing_method(
     'Floyd Dither',
-    default_params={'strength': 1.0},
-    description="Create smooth gradients using diffusion. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if it looks too red!"
+    default_params={'strength': 0.6},
+    description="Create smooth gradients using diffusion. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def floyd_steinberg_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2289,8 +2302,8 @@ def floyd_steinberg_dithering(img, color_key, params):
 
 @register_processing_method(
     'Sierra Dither',
-    default_params={'strength': 1.0},
-    description="Idk what to say about this one lol. Uncheck \"Use LAB Colors\" if it looks too red!"
+    default_params={'strength': 0.6},
+    description="Idk what to say about this one lol. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def sierra2_dithering(img, color_key, params):
     strength = params.get('strength', 1.0)
@@ -2454,13 +2467,13 @@ def save_image(img, preview_path, color_key_array):
 
     COLOR_KEY = {
         -1: (0, 0, 0, 0),         # FULL ALPHA (transparent)
-        0: (255, 231, 197, 255),  # 'ffe7c5'
-        1: (42, 56, 68, 255),     # '2a3844'
-        2: (215, 11, 93, 255),    # 'd70b5d'
-        3: (13, 179, 158, 255),   # '0db39e'
-        4: (244, 192, 9, 255),    # 'f4c009'
+        0: (255, 238, 218, 255),  # 'ffe7c5'
+        1: (5, 11, 21, 255),     # '2a3844'
+        2: (172, 0, 41, 255),    # 'd70b5d'
+        3: (0, 133, 131, 255),   # '0db39e'
+        4: (230, 157, 0, 255),    # 'f4c009'
         5: (255, 0, 255, 255),    # 'ff00ff'
-        6: (186, 195, 87, 255),   # 'bac357'
+        6: (125, 162, 36, 255),   # 'bac357'
         7: (163, 178, 210, 255),  # '#a3b2d2'
         8: (214, 206, 194, 255),  # '#d6cec2'
         9: (191, 222, 216, 255),  # '#bfded8'
@@ -3602,13 +3615,13 @@ class CanvasWorker(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.COLOR_MAP = {
-            0: 'ffe7c5',
-            1: '2a3844',
-            2: 'd70b5d',
-            3: '0db39e',
-            4: 'f4c009',
+            0: 'ffeeda',
+            1: '050b15',
+            2: 'ac0029',
+            3: '008583',
+            4: 'e69d00',
             5: 'ff00ff',
-            6: 'bac357',
+            6: '7da224',
             7: 'a3b2d2',
             8: 'd6cec2',
             9: 'bfded8',
@@ -3984,12 +3997,12 @@ class MainWindow(QMainWindow):
         self.new_color = None  # Single color 5
         self.autocolor = True
         self.default_color_key_array = [
-            {'number': 0, 'hex': 'ffe7c5', 'boost': 1.2, 'threshold': 20, 'name': 'White'},
-            {'number': 1, 'hex': '2a3844', 'boost': 1.2, 'threshold': 20, 'name': 'Black'},
-            {'number': 2, 'hex': 'd70b5d', 'boost': 1.2, 'threshold': 20, 'name': 'Red'},
-            {'number': 3, 'hex': '0db39e', 'boost': 1.2, 'threshold': 20, 'name': 'Blue'},
-            {'number': 4, 'hex': 'f4c009', 'boost': 1.2, 'threshold': 20, 'name': 'Yellow'},
-            {'number': 6, 'hex': 'bac357', 'boost': 1.2, 'threshold': 20, 'name': 'Green'},
+            {'number': 0, 'hex': 'ffeeda', 'boost': 1.2, 'threshold': 20, 'name': 'White'},
+            {'number': 1, 'hex': '050b15', 'boost': 1.2, 'threshold': 20, 'name': 'Black'},
+            {'number': 2, 'hex': 'ac0029', 'boost': 1.2, 'threshold': 20, 'name': 'Red'},
+            {'number': 3, 'hex': '008583', 'boost': 1.2, 'threshold': 20, 'name': 'Blue'},
+            {'number': 4, 'hex': 'e69d00', 'boost': 1.2, 'threshold': 20, 'name': 'Yellow'},
+            {'number': 6, 'hex': '7da224', 'boost': 1.2, 'threshold': 20, 'name': 'Green'},
         ]
         undo_shortcut = QShortcut(QKeySequence("Ctrl+Z"), self)
         undo_shortcut.activated.connect(self.undo_action)
@@ -4653,13 +4666,13 @@ class MainWindow(QMainWindow):
         try:
             # Define color key as per the provided mapping
             color_key = {
-                0: 'ffe7c5',
-                1: '2a3844',
-                2: 'd70b5d',
-                3: '0db39e',
-                4: 'f4c009',
+                0: 'ffeeda',
+                1: '050b15',
+                2: 'ac0029',
+                3: '008583',
+                4: 'e69d00',
                 5: 'ff00ff',
-                6: 'bac357',
+                6: '7da224',
                 7: 'a3b2d2',
                 8: 'd6cec2',
                 9: 'bfded8',
@@ -5591,13 +5604,13 @@ class MainWindow(QMainWindow):
         try:
             # Define color key as per the provided mapping
             color_key = {
-                0: 'ffe7c5',
-                1: '2a3844',
-                2: 'd70b5d',
-                3: '0db39e',
-                4: 'f4c009',
+                0: 'ffeeda',
+                1: '050b15',
+                2: 'ac0029',
+                3: '008583',
+                4: 'e69d00',
                 5: 'ff00ff',
-                6: 'bac357',
+                6: '7da224',
                 7: 'a3b2d2',
                 8: 'd6cec2',
                 9: 'bfded8',
@@ -7012,13 +7025,13 @@ class MainWindow(QMainWindow):
         self.resize_value_label.setText(str(value))
         if not self.manual_change:
             if not self.is_gif:
-                if value > 200:
+                if value > 250:
                     if "Jarvis Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)  # Block signals
                         self.processing_combobox.setCurrentText("Jarvis Dither")
                         self.processing_combobox.blockSignals(False)  # Unblock signals
                         self.processing_method_changed("Jarvis Dither", strength=False, manual=False)
-                elif value > 64:
+                elif value > 50:
                     if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)
                         self.processing_combobox.setCurrentText("Pattern Dither")
@@ -7031,7 +7044,7 @@ class MainWindow(QMainWindow):
                         self.processing_combobox.blockSignals(False)
                         self.processing_method_changed("Color Match", strength=False, manual=False)
             else:
-                if value > 80:
+                if value > 50:
                     if "Pattern Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)
                         self.processing_combobox.setCurrentText("Pattern Dither")
