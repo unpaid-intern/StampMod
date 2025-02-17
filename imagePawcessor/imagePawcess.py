@@ -4382,7 +4382,7 @@ class MainWindow(QMainWindow):
         # -------------------------
         initial_layout.addWidget(background_container, alignment=Qt.AlignCenter)
 
-        self.signature_label = QLabel("By PurplePuppy & baltdev")
+        self.signature_label = QLabel("By PurplePuppy & baltdev & TeamFishnet")
 
         self.signature_label.setStyleSheet("""
             color: #A45EE5;
@@ -4391,7 +4391,7 @@ class MainWindow(QMainWindow):
             font-weight: bold;
         """)
         self.signature_label.setAlignment(Qt.AlignLeft | Qt.AlignBottom)
-        self.signature_label.setFixedSize(200, 20)  # Adjust width and height as needed
+        self.signature_label.setFixedSize(400, 20)  # Adjust width and height as needed
         self.signature_label.setParent(self)
 
 # Set initial position for the signature label
