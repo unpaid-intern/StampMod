@@ -466,7 +466,7 @@ def apply_clahe(
     clahe_clip_limit=3.0,
     clahe_grid_size=8,
     gamma=0.9,
-    color_boost=1.5,
+    color_boost=1.4,
     range_min=10,
     range_max=245,
 ):
@@ -978,9 +978,9 @@ def preprocess_image(
             'alpha_threshold': 191,
             'clahe_clip_limit': 3.5,
             'clahe_grid_size': 6,
-            'unsharp_strength': 1.5,
+            'unsharp_strength': 1.1,
             'unsharp_radius': 2,
-            'gamma_correction': 0.9,
+            'gamma_correction': 0.8,
             'contrast_percentiles': (1, 99),
         }
 
@@ -1674,6 +1674,8 @@ def color_matching(img, color_key, params):
     return result_img
 
 
+
+
 @register_processing_method(
     'Pattern Dither',
     default_params={'strength': 1.00},
@@ -1871,56 +1873,6 @@ def ordered_dithering(img, color_key, params):
 
 
 
-@register_processing_method(
-    'K-Means Mapping',
-    default_params={'Clusters': 12},
-    description="Simplify complex images to be less noisy! Use slider to adjust the amount of color groups. Uncheck \"Use LAB Colors\" if the colors seem off!"
-)
-def simple_k_means_palette_mapping(img, color_key, params):
-    has_alpha = (img.mode == 'RGBA')
-    if has_alpha:
-        alpha_channel = np.array(img.getchannel('A'))
-        rgb_img = img.convert('RGB')
-    else:
-        alpha_channel = None
-        rgb_img = img
-
-    data = np.array(rgb_img)
-    data_flat = data.reshape((-1, 3))
-
-    clusters = params['Clusters']
-    if clusters == 16:
-        clusters = 24  # special tweak
-
-    with parallel_backend('threading', n_jobs=1):
-        kmeans = KMeans(
-            n_clusters=clusters,
-            init="k-means++",
-            n_init=10,
-            random_state=0
-        ).fit(data_flat)
-
-    cluster_centers = kmeans.cluster_centers_
-    labels = kmeans.labels_
-
-    # Map cluster centers individually
-    cluster_map = {}
-    for i, center in enumerate(cluster_centers):
-        center_rgb = tuple(center.astype(np.uint8))
-        c_idx = find_closest_color(center_rgb, color_key)
-        cluster_map[i] = color_key[c_idx]
-
-    mapped_flat = np.array([cluster_map[label] for label in labels], dtype=np.uint8)
-    mapped_data = mapped_flat.reshape(data.shape)
-
-    if has_alpha:
-        rgba_data = np.dstack((mapped_data, alpha_channel))
-        result_img = Image.fromarray(rgba_data, 'RGBA')
-    else:
-        result_img = Image.fromarray(mapped_data, 'RGB')
-
-    return result_img
-
 # ---------------------------------------------------------------------------
 # Numba‑jittable conversion from sRGB to CIELAB.
 # (L is scaled to [0,255] so that it’s compatible with our palette.)
@@ -2078,7 +2030,7 @@ def hybrid_dither_numba(img_array, saliency_array, alpha_mask, palette_rgb, pale
 # ---------------------------------------------------------------------------
 @register_processing_method(
     'Hybrid Dither',
-    default_params={'strength': 0.6},
+    default_params={'strength': 0.75},
     description="Switches between Atkinson and Floyd dithering based on texture. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def hybrid_dithering(img, color_key, params):
@@ -2241,7 +2193,7 @@ def dither_loop(arr, rand_offs, palette, strength):
 
 @register_processing_method(
     'Atkinson Dither',
-    default_params={'strength': 0.6},
+    default_params={'strength': 0.75},
     description="Dithering suited for smaller images! Used by the Macintosh for monochrome displays. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def atkinson_dithering(img, color_key, params):
@@ -2256,7 +2208,7 @@ def atkinson_dithering(img, color_key, params):
 
 @register_processing_method(
     'Jarvis Dither',
-    default_params={'strength': 0.6},
+    default_params={'strength': 0.75},
     description="Applies diffusion over a large area. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def jarvis_judice_ninke_dithering(img, color_key, params):
@@ -2271,7 +2223,7 @@ def jarvis_judice_ninke_dithering(img, color_key, params):
 
 @register_processing_method(
     'Stucki Dither',
-    default_params={'strength': 0.6},
+    default_params={'strength': 0.75},
     description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def stucki_dithering(img, color_key, params):
@@ -2286,7 +2238,7 @@ def stucki_dithering(img, color_key, params):
 
 @register_processing_method(
     'Floyd Dither',
-    default_params={'strength': 0.6},
+    default_params={'strength': 0.75},
     description="Create smooth gradients using diffusion. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def floyd_steinberg_dithering(img, color_key, params):
@@ -2302,7 +2254,7 @@ def floyd_steinberg_dithering(img, color_key, params):
 
 @register_processing_method(
     'Sierra Dither',
-    default_params={'strength': 0.6},
+    default_params={'strength': 0.75},
     description="Idk what to say about this one lol. Uncheck \"Use LAB Colors\" if the colors seem off!"
 )
 def sierra2_dithering(img, color_key, params):
@@ -2312,6 +2264,165 @@ def sierra2_dithering(img, color_key, params):
         (-2, 1, 1/16), (-1, 1, 2/16), (0, 1, 3/16), (1, 1, 2/16), (2, 1, 1/16),
     ]
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
+
+
+
+from skimage.color import rgb2lab
+from sklearn.cluster import MeanShift
+@register_processing_method(
+    'Mean Shift Mapping',
+    default_params={'Bandwidth': 20.0},
+    description="VERY SLOW! Simplify images using mean shifting. Uncheck \"Use LAB Colors\" if the colors seem off. Dont use to process videos..."
+)
+def simple_mean_shift_palette_mapping(img, color_key, params):
+    """
+    Mean Shift palette mapping with optional LAB or RGB color space.
+    - If use_lab is True, we convert image to LAB for clustering and also
+      compare cluster centers to the color_key in LAB.
+    - If use_lab is False, we do it all in RGB space.
+
+    """
+    from skimage.color import rgb2lab
+
+    # Separate alpha if present
+    has_alpha = (img.mode == 'RGBA')
+    if has_alpha:
+        alpha_channel = np.array(img.getchannel('A'))
+        rgb_img = img.convert('RGB')
+    else:
+        alpha_channel = None
+        rgb_img = img
+
+    # Flatten the image data
+    data = np.array(rgb_img, dtype=np.float32)
+    H, W, _ = data.shape
+
+    # Convert to LAB or stay in RGB
+    if use_lab:
+        data01 = data / 255.0
+        data_lab = rgb2lab(data01)  # shape (H, W, 3)
+        # Scale L from [0..100] up to [0..255] to match your custom rgb_to_lab_numba
+        data_lab[..., 0] *= (255.0 / 100.0)
+        data_flat = data_lab.reshape((-1, 3))
+    else:
+        data_flat = data.reshape((-1, 3))
+
+    # Also build a LAB version of the color_key if needed
+    if use_lab:
+        color_key_lab = {}
+        for k, (r, g, b) in color_key.items():
+            L, a_val, b_val = rgb_to_lab_numba(r, g, b)
+            color_key_lab[k] = (L, a_val, b_val)
+    else:
+        color_key_lab = None
+
+    # Run Mean Shift
+    bandwidth = params['Bandwidth']
+    with parallel_backend('threading', n_jobs=1):
+        ms = MeanShift(bandwidth=bandwidth, bin_seeding=True)
+        ms.fit(data_flat)
+
+    labels = ms.labels_
+    cluster_centers = ms.cluster_centers_  # shape (#clusters, 3)
+
+    # Map each cluster center to the closest color in color_key
+    cluster_map = {}
+    for i, center in enumerate(cluster_centers):
+        if use_lab:
+            # Already in LAB
+            # Find the color_key that is closest in LAB
+            best_key = None
+            best_dist = 1e10
+            for k, (cL, ca, cb) in color_key_lab.items():
+                dL = center[0] - cL
+                da = center[1] - ca
+                db = center[2] - cb
+                dist = dL*dL + da*da + db*db
+                if dist < best_dist:
+                    best_dist = dist
+                    best_key = k
+            cluster_map[i] = color_key[best_key]
+        else:
+            # Convert center to [0..255] range
+            c_rgb = np.clip(center, 0, 255).astype(np.uint8)
+            c_rgb_f = c_rgb.astype(np.float32)
+
+            best_key = None
+            best_dist = 1e10
+            for k, (cr, cg, cb) in color_key.items():
+                # Subtract in float
+                dr = c_rgb_f[0] - float(cr)
+                dg = c_rgb_f[1] - float(cg)
+                db = c_rgb_f[2] - float(cb)
+                dist = dr*dr + dg*dg + db*db
+                if dist < best_dist:
+                    best_dist = dist
+                    best_key = k
+            cluster_map[i] = color_key[best_key]
+
+    # Build final mapped image
+    mapped_flat = np.array([cluster_map[lbl] for lbl in labels], dtype=np.uint8)
+    mapped_data = mapped_flat.reshape((H, W, 3))
+
+    # Reattach alpha if present
+    if has_alpha:
+        rgba_data = np.dstack((mapped_data, alpha_channel))
+        out_img = Image.fromarray(rgba_data, 'RGBA')
+    else:
+        out_img = Image.fromarray(mapped_data, 'RGB')
+
+    return out_img
+
+
+@register_processing_method(
+    'K-Means Mapping',
+    default_params={'Clusters': 12},
+    description="Simplify complex images to be less noisy! Use slider to adjust the amount of color groups. Uncheck \"Use LAB Colors\" if the colors seem off!"
+)
+def simple_k_means_palette_mapping(img, color_key, params):
+    has_alpha = (img.mode == 'RGBA')
+    if has_alpha:
+        alpha_channel = np.array(img.getchannel('A'))
+        rgb_img = img.convert('RGB')
+    else:
+        alpha_channel = None
+        rgb_img = img
+
+    data = np.array(rgb_img)
+    data_flat = data.reshape((-1, 3))
+
+    clusters = params['Clusters']
+    if clusters == 16:
+        clusters = 24  # special tweak
+
+    with parallel_backend('threading', n_jobs=1):
+        kmeans = KMeans(
+            n_clusters=clusters,
+            init="k-means++",
+            n_init=10,
+            random_state=0
+        ).fit(data_flat)
+
+    cluster_centers = kmeans.cluster_centers_
+    labels = kmeans.labels_
+
+    # Map cluster centers individually
+    cluster_map = {}
+    for i, center in enumerate(cluster_centers):
+        center_rgb = tuple(center.astype(np.uint8))
+        c_idx = find_closest_color(center_rgb, color_key)
+        cluster_map[i] = color_key[c_idx]
+
+    mapped_flat = np.array([cluster_map[label] for label in labels], dtype=np.uint8)
+    mapped_data = mapped_flat.reshape(data.shape)
+
+    if has_alpha:
+        rgba_data = np.dstack((mapped_data, alpha_channel))
+        result_img = Image.fromarray(rgba_data, 'RGBA')
+    else:
+        result_img = Image.fromarray(mapped_data, 'RGB')
+
+    return result_img
 
 
 def process_image(img, color_key, process_mode, process_params):
@@ -7025,7 +7136,7 @@ class MainWindow(QMainWindow):
         self.resize_value_label.setText(str(value))
         if not self.manual_change:
             if not self.is_gif:
-                if value > 250:
+                if value > 256:
                     if "Jarvis Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)  # Block signals
                         self.processing_combobox.setCurrentText("Jarvis Dither")
@@ -8310,6 +8421,36 @@ class MainWindow(QMainWindow):
                 # Save the slider to parameter widgets
                 self.parameter_widgets[param_name] = slider
 
+            # Special handling for 'Clusters'
+            elif param_name == 'Bandwidth':
+                # Create slider
+                slider = QSlider(Qt.Horizontal)
+                slider.setRange(5, 80)  # Range for clusters
+                slider.setValue(20) 
+                slider.setTickPosition(QSlider.TicksBelow)
+                slider.setTickInterval(1)  # Step size for clusters
+                slider.valueChanged.connect(self.parameter_value_changed)
+
+                # Display value dynamically
+                value_label = QLabel(str(slider.value()))
+                value_label.setAlignment(Qt.AlignCenter)
+                value_label.setFixedWidth(60)
+
+                # Combine slider and value label into a horizontal layout
+                slider_layout = QHBoxLayout()
+                slider_layout.addWidget(slider)
+                slider_layout.addWidget(value_label)
+
+                # Update value label when the slider changes
+                def update_value_label(value):
+                    value_label.setText(str(value))
+                slider.valueChanged.connect(update_value_label)
+                update_value_label(20)
+                # Add slider layout to the form
+                self.method_options_layout.addRow(label, slider_layout)
+
+                # Save the slider to parameter widgets
+                self.parameter_widgets[param_name] = slider
 
             elif isinstance(default_value, (float, int)):
                 slider = QSlider(Qt.Horizontal)

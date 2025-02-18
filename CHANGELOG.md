@@ -81,11 +81,17 @@ got ctrl z to function and changed keybinds
 - added webm support.
 - fixed video preview bugs
 - awesome text write feature by baltdev
+# 2.3.1
+- improved color accuracy for in game colors
+- better pattern dither
+# 2.3.2 
+- added mean shift mapping as requested from nova 
 # future updates will be slow and may not happen at all, but could include:
 - longer multiframe support
 - canvasAPI for modders if eli doesnt just make one himself lol (sorry)
-- separate mod "webpaint" for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
+- separate mod for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
 - canvas locking for hosts
 - better organised save menu
-- more stamps off-canvas
-> in that order, at which point i think im happy to move on to other projects outside of webfishing.
+- improved ctrl z logic
+- more stamps off-canvas (especially for hosts)
+> in that order, at which point i think im happy to move on to other projects outside of webfishing. i wanted to make something cool and i did!
