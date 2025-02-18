@@ -86,6 +86,12 @@ got ctrl z to function and changed keybinds
 - better pattern dither
 # 2.3.2 
 - added mean shift mapping as requested from nova 
+# 2.4.0
+- switched to using my new canvasapi
+- added canvas rotation and orientation in 3d space (hopefully)
+- added new feature to place at the nearest "best viewing area" when holding control (replaces placing at dock)
+- better preprocessing / processing. 
+- added new processing method posterize as an alternative to k means mapping.
 # future updates will be slow and may not happen at all, but could include:
 - longer multiframe support
 - canvasAPI for modders if eli doesnt just make one himself lol (sorry)
