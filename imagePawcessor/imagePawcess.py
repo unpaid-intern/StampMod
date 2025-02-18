@@ -2365,7 +2365,7 @@ def sierra2_dithering(img, color_key, params):
 
 @register_processing_method(
     'Posterize',
-    default_params={'levels': 6},
+    default_params={'levels': 8},
     description=
         "Use the 'levels' parameter to control how many discrete steps per channel. "
         "Uncheck \"Use LAB Colors\" if the colors seem off!"
@@ -8588,7 +8588,7 @@ class MainWindow(QMainWindow):
                 # Create slider
                 slider = QSlider(Qt.Horizontal)
                 slider.setRange(2, 16)  # Range for clusters
-                slider.setValue(6) 
+                slider.setValue(8) 
                 slider.setTickPosition(QSlider.TicksBelow)
                 slider.setTickInterval(1)  # Step size for clusters
                 slider.valueChanged.connect(self.parameter_value_changed)
@@ -8607,7 +8607,7 @@ class MainWindow(QMainWindow):
                 def update_value_label(value):
                     value_label.setText(str(value))
                 slider.valueChanged.connect(update_value_label)
-                update_value_label(6)
+                update_value_label(8)
                 # Add slider layout to the form
                 self.method_options_layout.addRow(label, slider_layout)
 
