@@ -9,7 +9,6 @@ var moveSpeed = 0
 var fastSpeed = 10
 var rotateSpeed = 100
 var fastRotateSpeed = 100
-
 var offset = Vector3(0, -1, 0)
 
 var inputValues = {
@@ -34,9 +33,9 @@ var defaultgif
 
 var framedatapath
 var temp = 0 #delete me
-var sparecanvasid 
+var sparecanvasid
 var sparecanvasexists
-var lp 
+var lp
 var ray_detector
 var cam
 var _hud
@@ -67,7 +66,7 @@ var _playing
 var _framecount
 var _framedelay
 var manual_frame_index = 0
-var _current_frame_index = 0  
+var _current_frame_index = 0
 var frame_data = []
 var frame_delays = []
 # The "screen" canvas references
@@ -102,7 +101,17 @@ func _ready():
 	ray_detector = ray_detector_scene.instance()
 	get_tree().current_scene.add_child(ray_detector)
 	ray_detector.translation = Vector3.ZERO
-	
+	SceneTransition.connect("_finished", self, "pausephysics")
+
+func pausephysics():
+	pausephysics = true
+	var wasplaying = _playing
+	_playing = false
+	yield(get_tree().create_timer(2), "timeout")
+	if screen1exists:
+		pausephysics = false
+	_playing = wasplaying
+
 func update_dynamic_nodes():
 	if not cam:
 		var viewport = get_node_or_null("/root/world/Viewport")
@@ -122,7 +131,7 @@ func update_dynamic_nodes():
 		_actor_man = get_node_or_null("/root/world")
 		if not _actor_man:
 			return false
-	if not ray_detector: #nonexistant function get parent on base nil what am i doing wring 
+	if not ray_detector: #nonexistant function get parent on base nil what am i doing wring
 		ray_detector = ray_detector_scene.instance()
 		get_tree().current_scene.add_child(ray_detector)
 		ray_detector.translation = Vector3.ZERO
@@ -143,13 +152,13 @@ func _physics_process(delta):
 	var cam_yaw = cam.global_transform.basis.get_euler().y
 	var forward = Vector3(0, 0, -1).rotated(Vector3.UP, cam_yaw)
 	var right   = Vector3(1, 0, 0).rotated(Vector3.UP, cam_yaw)
-	
+
 
 	var forward_input  = inputValues["I"] - inputValues["K"]
 	var right_input    = inputValues["L"] - inputValues["J"]
 	var vertical_input = inputValues["O"] - inputValues["U"]
 	var move_hor = (forward * forward_input + right * right_input) * (delta * moveSpeed)
-	
+
 
 	if screen1exists and !(large and canvastotal == 2):
 		# Horizontal movement
@@ -159,43 +168,43 @@ func _physics_process(delta):
 			pos.z += move_hor.z
 			screen1Actor.global_transform.origin = pos
 			centerpos = screen1Actor.global_transform.origin
-		
+
 		# Rotation input
 		var yaw   = (inputValues["right"] - inputValues["left"]) * delta * rotateSpeed
 		var pitch = (inputValues["down"] - inputValues["up"])     * delta * rotateSpeed
-		
+
 		if yaw != 0:
 			screen1Actor.rotate(Vector3.UP, deg2rad(yaw))
 		if pitch != 0:
 			screen1Actor.rotate_object_local(Vector3.RIGHT, deg2rad(pitch))
-		
+
 		# Clamp pitch so it never goes below 0.
 		if screen1Actor.rotation.x < 0:
 			var fixed = screen1Actor.rotation
 			fixed.x = 0
 			screen1Actor.rotation = fixed
-		
+
 		# Initialize base_y on first run.
 		if base_y == null:
 			base_y = _gety(screen1Actor.global_transform.origin) + groundoffset
-		
+
 		# Compute vertical lift based on pitch.
 		var current_pitch = clamp(screen1Actor.rotation.x, 0, PI)
 		var new_y = base_y + groundoffset * sin(current_pitch)
 		var new_transform = screen1Actor.global_transform
 		new_transform.origin.y = new_y
 		screen1Actor.global_transform = new_transform
-		
+
 		# Allow vertical input to adjust base_y.
 		base_y += vertical_input * delta * moveSpeed
-	
+
 	# ---- TWO CANVAS LOGIC ----
 	else:
 		# 1. Update the center position (like the single-canvas horizontal movement)
 		if move_hor != Vector3.ZERO:
 			centerpos.x += move_hor.x
 			centerpos.z += move_hor.z
-		
+
 		# 2. Update the current rotation from yaw/pitch input.
 		var yaw_delta   = (inputValues["right"] - inputValues["left"]) * delta * rotateSpeed
 		var pitch_delta = (inputValues["down"] - inputValues["up"])     * delta * rotateSpeed
@@ -203,35 +212,35 @@ func _physics_process(delta):
 		current_rotation.x += deg2rad(pitch_delta)
 		# Clamp pitch between 0 and PI (0° to 180°)
 		current_rotation.x = clamp(current_rotation.x, 0, PI)
-		
+
 		# 3. Update vertical position of the center using the same logic.
 		if base_y == null:
 			base_y = _gety(centerpos) + groundoffset
 		base_y += vertical_input * delta * moveSpeed
 		var new_y = base_y + groundoffset * sin(current_rotation.x)
 		centerpos.y = new_y
-		
+
 		# 4. Compute each canvas’s offset relative to the center.
 		var offset1 = screen1initial - origininitial
 		var offset2 = screen2initial - origininitial
-		
+
 		# 5. Calculate the "delta rotation" – how much the current rotation differs from the initial.
 		var b_current = Basis(current_rotation)
 		var b_initial = Basis(rotinitial)
 		var delta_rot = b_current * b_initial.inverse()
-		
+
 		# 6. Rotate the initial offsets.
 		var rotated_offset1 = delta_rot.xform(offset1)
 		var rotated_offset2 = delta_rot.xform(offset2)
-		
+
 		# 7. Set the new positions for each canvas around the center.
 		screen1Actor.global_transform.origin = centerpos + rotated_offset1
 		screen2Actor.global_transform.origin = centerpos + rotated_offset2
-		
+
 		# 8. Update both canvases' rotations to match current_rotation.
 		screen1Actor.rotation = current_rotation
 		screen2Actor.rotation = current_rotation
-	
+
 
 	var inputChanged = false
 	if move_hor != Vector3.ZERO:
@@ -246,7 +255,7 @@ func _physics_process(delta):
 		inputChanged = true
 	elif (inputValues["down"] - inputValues["up"]) != 0:
 		inputChanged = true
-	
+
 	if inputChanged:
 		posUpdate()
 
@@ -256,7 +265,7 @@ func _physics_process(delta):
 func _input(event):
 	if not event is InputEventKey:
 		return
-	
+
 	if event.pressed:
 		if lp and not lp.busy:
 			match event.scancode:
@@ -338,7 +347,7 @@ func parse_stamp_data(path):
 		"framecount": _framecount,
 		"framedelay": _framedelay
 	}
-	
+
 func assign_stamp_data(data: Dictionary) -> void:
 	if data.size() == 0:
 		print("No data to apply or failed to parse.")
@@ -367,7 +376,7 @@ func assign_stamp_data(data: Dictionary) -> void:
 
 func getstampdata(path: String) -> Array:
 	var result_data = []
-	
+
 	var file = File.new()
 	var error = file.open(path, File.READ)
 	if error != OK:
@@ -377,7 +386,7 @@ func getstampdata(path: String) -> Array:
 	# Skip the first line (the one containing imgx, imgy, gif info, etc.)
 	if not file.eof_reached():
 		file.get_line() # discard first line
-	
+
 	# Now read subsequent lines for tile data
 	while not file.eof_reached():
 		var line = file.get_line().strip_edges()
@@ -388,25 +397,25 @@ func getstampdata(path: String) -> Array:
 				var img_x = int(round(parts[0].to_float() * 10))
 				var img_y = int(round(parts[1].to_float() * 10))
 				var color = parts[2].to_int()
-				
+
 				# Append an array of [x, y, colorTile] to the result_data
 				result_data.append([img_x, img_y, color])
-				
+
 	return result_data
 
 
 
 	file.close()
 	return result_data
-	
+
 func applyTransform(data, imgx, imgy, firstgifframe = false):
 	var transformed = []
-	
-		
+
+
 	# Calculate centering offsets (to center the stamp in a 200×200 space)
 	var offset_x = (200 - imgx) * 0.5
 	var offset_y = (200 - imgy) * 0.5
-	
+
 
 	if firstgifframe:
 		for tile in data:
@@ -425,10 +434,10 @@ func applyTransform(data, imgx, imgy, firstgifframe = false):
 			var a_x = orig_x + offset_x
 			var a_y = orig_y - offset_y
 			transformed.append([ int(round(a_x)), int(round(imgy - a_y)), color ])
-	
+
 	return transformed
-	
-func applyLargeTransform(data, imgx, imgy): 
+
+func applyLargeTransform(data, imgx, imgy):
 	# For taking the input data and transforming it into two different 200×200 arrays.
 	# Each array is placed on a separate canvas mat and they are placed next to each other.
 	var transformed = []
@@ -439,7 +448,7 @@ func applyLargeTransform(data, imgx, imgy):
 		var offset = imgy/2
 		var offset2 = imgy-200
 		var offsetx = (200 - imgx) * 0.5
-		for tile in data: 
+		for tile in data:
 			var orig_x = tile[0]
 			var orig_y = tile[1]
 			var color = tile[2]
@@ -447,7 +456,7 @@ func applyLargeTransform(data, imgx, imgy):
 			var a_y = orig_y
 			transformed.append([ int(round(a_x)), int(round(imgy - a_y)), color ])
 		for tile in transformed:
-			if tile[1] < (offset): 
+			if tile[1] < (offset):
 				data2.append([ tile[0] + offsetx, tile[1], tile[2] ])
 			else:
 				data1.append([ tile[0] + offsetx, tile[1] - offset2, tile[2] ])
@@ -455,7 +464,7 @@ func applyLargeTransform(data, imgx, imgy):
 		var offset = imgx/2
 		var offset2 = imgx-200
 		var offsety = (200 - imgy) * 0.5
-		for tile in data: 
+		for tile in data:
 			var orig_x = tile[0]
 			var orig_y = tile[1]
 			var color = tile[2]
@@ -463,8 +472,8 @@ func applyLargeTransform(data, imgx, imgy):
 			var a_y = orig_y
 			transformed.append([ int(round(a_x)), int(round(imgy - a_y)), color ])
 		for tile in transformed:
-			
-			if tile[0] < (offset): 
+
+			if tile[0] < (offset):
 				data1.append([ tile[0], tile[1] + offsety, tile[2] ])
 			else:
 				data2.append([ tile[0] - offset2, tile[1] + offsety, tile[2] ])
@@ -472,8 +481,8 @@ func applyLargeTransform(data, imgx, imgy):
 		"load1": data1,
 		"load2": data2,
 	}
-	
-	
+
+
 func rotateCanvasesToCameraYaw() -> void:
 	# 1) Get the camera's current yaw (radians)
 	var cam_euler: Vector3 = cam.global_transform.basis.get_euler()
@@ -507,20 +516,20 @@ func rotateCanvasesToCameraYaw() -> void:
 	screen1Actor.rotation = current_rotation
 	screen2Actor.rotation = current_rotation
 
-	
+
 func getPos():
 	var pos = last_mouse_pos
 	pos.y = yield(_gety(last_mouse_pos), "completed")
 	base_y = pos.y
 	return pos
-	
+
 func applyInitialRotatePosition() -> void:
 	# Get the camera's Euler rotation (in radians)
 	var cam_euler: Vector3 = cam.global_transform.basis.get_euler()
 	var cam_yaw: float = cam_euler.y
 	var current_yaw: float = screen1Actor.rotation.y
 	var delta_yaw: float = cam_yaw - current_yaw
-	
+
 	# Rotate screen1Actor (and screen2Actor if large) by the yaw difference.
 	screen1Actor.rotate_object_local(Vector3.UP, delta_yaw)
 	rotinitial = screen1Actor.global_transform.basis.get_euler()
@@ -543,12 +552,12 @@ func getLargePos(centerpos: Vector3, centerspacing: float) -> Dictionary:
 		var cam_right: Vector3 = cam.global_transform.basis.x.normalized()
 		pos1 = centerpos - cam_right * (centerspacing * 0.5)
 		pos2 = centerpos + cam_right * (centerspacing * 0.5)
-	
+
 	# Set initial positions relative to the center.
 	origininitial = centerpos
 	screen1initial = pos1
 	screen2initial = pos2
-	
+
 	# Return a dictionary containing both positions.
 	return {"pos1": pos1, "pos2": pos2}
 
@@ -565,6 +574,8 @@ func spawnCanvas(stamppath, framespath = null):
 		check_image_resolution(stamppath, last_mouse_pos)
 		return
 	var viewspot = false
+	if Input.is_key_pressed(KEY_CONTROL):
+		viewspot = true
 	var _playing = false
 	yield(get_tree().create_timer(0.2), "timeout")
 	var atoldspot = false
@@ -577,8 +588,6 @@ func spawnCanvas(stamppath, framespath = null):
 		if Input.is_key_pressed(KEY_SHIFT) && screen1exists:
 			oldrot = screen1Actor.rotation
 			atoldspot = true
-	if Input.is_key_pressed(KEY_CONTROL):
-		viewspot = true
 	pausephysics = true
 	#check if placing on canvas
 	base_y = 0
@@ -604,7 +613,7 @@ func spawnCanvas(stamppath, framespath = null):
 		var posdata = getLargePos(pos, centerspacing)
 		var pos1 = posdata["pos1"]
 		var pos2 = posdata["pos2"]
-		
+
 		spawnScreens(pos1, pos2, current_zone)
 		waslarge = true
 		canvastotal = 2
@@ -624,7 +633,7 @@ func spawnCanvas(stamppath, framespath = null):
 		stampdata = applyTransform(stampdata, imgx, imgy, isgif)
 
 		spawnScreen(pos, current_zone)
-		canvastotal += 1 
+		canvastotal += 1
 		handleScreen1Packet(stampdata)
 		applyInitialRotatePosition()
 		if viewspot:
@@ -652,7 +661,7 @@ export(Array, Dictionary) var non_main_zone_spots = [
 
 func getNearestSpot() -> Dictionary:
 	var candidate_spots: Array = []
-	
+
 	if current_zone != "main_zone":
 		candidate_spots = non_main_zone_spots
 	else:
@@ -661,17 +670,17 @@ func getNearestSpot() -> Dictionary:
 
 	if candidate_spots.empty():
 		return {"viewpos": lp.global_transform.origin, "viewrot": Vector3(0, 0, 0)}
-	
+
 
 	var nearest_candidate: Dictionary = candidate_spots[0]
 	var nearest_distance: float = (lp.global_transform.origin - nearest_candidate["viewpos"]).length()
-	
+
 	for candidate in candidate_spots:
 		var dist: float = (lp.global_transform.origin - candidate["viewpos"]).length()
 		if dist < nearest_distance:
 			nearest_distance = dist
 			nearest_candidate = candidate
-			
+
 	return nearest_candidate
 
 func positionCanvasesAt(new_center: Vector3, new_rot: Vector3) -> void:
@@ -805,7 +814,7 @@ func findDefaultCanvas(pos: Vector3):
 func createCanvas(targetPos, zone):
 	var canvasResult = {}
 	canvasResult["actorID"] = Network._sync_create_actor("canvas", targetPos, zone, -1, Network.STEAM_ID, Vector3.ZERO)
-	
+
 	for node in get_tree().get_nodes_in_group("actor"):
 		if not is_instance_valid(node):
 			continue
@@ -831,7 +840,7 @@ func spawnScreens(targetPos, targetPos2, zone):
 	screen1Actor      = result["actor"]
 	screen1CanvasNode = result["canvasNode"]
 	screen1TileMap    = result["tileMap"]
-	
+
 	result = createCanvas(targetPos2, zone)
 	screen2ActorID    = result["actorID"]
 	screen2Actor      = result["actor"]
@@ -847,7 +856,7 @@ func handleScreen1Packet(data):
 		var colorTile = pixelData[2]
 		canvasData.append([Vector2(posX, posY), colorTile])
 		screen1TileMap.set_cell(posX, posY, colorTile)
-	
+
 	updateCanvas(canvasData, screen1ActorID)
 
 func handleScreen2Packet(data):
@@ -858,7 +867,7 @@ func handleScreen2Packet(data):
 		var colorTile = pixelData[2]
 		canvasData.append([Vector2(posX, posY), colorTile])
 		screen2TileMap.set_cell(posX, posY, colorTile)
-	
+
 	updateCanvas(canvasData, screen2ActorID)
 
 func updateCanvas(canvasData, canvasActorID):
@@ -876,7 +885,7 @@ func clearDrawings():
 			canvasData.append([Vector2(x, y), -1])
 			screen1TileMap.set_cell(x, y, -1)
 			screen2TileMap.set_cell(x, y, -1)
-	
+
 	updateCanvas(canvasData, screen1ActorID)
 	updateCanvas(canvasData, screen2ActorID)
 
@@ -924,21 +933,21 @@ func resetGifState() -> void:
 	_current_frame_index = 0
 	manual_frame_index = 0
 	_playing = false
-	
+
 	# Clear all frame data.
 	if frame_data:
 		frame_data.clear()
-	
+
 
 	if typeof(frame_delays) == TYPE_ARRAY:
 		frame_delays.clear()
-	
+
 
 	processing = false
 	another = false
 
 	_framedelay = false
-	
+
 	# Send a notification for debugging (optional).
 	print("GIF state has been reset.")
 
@@ -985,6 +994,7 @@ func getGifData(file_path: String) -> Array:
 	var current_frame_number: int = 0
 	var current_delay: int = 0
 	var current_frame_data = []
+	var last_transformed = null  # Store the last frame's transformed data
 	
 	# Loop over every line.
 	for line in lines:
@@ -998,19 +1008,24 @@ func getGifData(file_path: String) -> Array:
 			if current_frame_data.size() > 0:
 				var transformed = applyTransformToPool(current_frame_data)
 				final_data.append([ current_frame_number, current_delay, transformed ])
+				last_transformed = transformed
 				current_frame_data.clear()
+			else:
+				# No new pixel data since the last header:
+				# If we have a previous frame, duplicate it.
+				if last_transformed != null:
+					final_data.append([ current_frame_number, current_delay, last_transformed ])
+			
 			header_set = true
 			var parts = line.split(",")
 			if parts.size() >= 3:
 				current_frame_number = parts[1].to_int()
-				# Debug output:
-				print("Header parts: ", parts)
 				# Use _framedelay if it’s nonzero; otherwise, use the header delay.
 				if _framedelay and int(_framedelay) != 0:
 					current_delay = int(_framedelay)
 				else:
 					current_delay = parts[2].to_int()
-				print("Parsed header: frame: ", current_frame_number, " delay: ", current_delay)
+				print("Parsed header: frame:", current_frame_number, "delay:", current_delay)
 			else:
 				push_error("Invalid frame header: " + line)
 		else:
@@ -1028,9 +1043,9 @@ func getGifData(file_path: String) -> Array:
 	if current_frame_data.size() > 0:
 		var transformed = applyTransformToPool(current_frame_data)
 		final_data.append([ current_frame_number, current_delay, transformed ])
+		last_transformed = transformed
 	
 	return final_data
-
 
 
 func playgif(message = true):
@@ -1114,11 +1129,11 @@ func _play():
 				yield(get_tree().create_timer(delay_sec * 2), "timeout")
 			PlaybackMode.SLOW:
 				yield(get_tree().create_timer(delay_sec * 10), "timeout")
-		
+
 		_current_frame_index += 1
 		if _current_frame_index >= frame_data.size():
 			_current_frame_index = 0
-		
+
 		if not _playing:
 			return
 
@@ -1138,7 +1153,7 @@ func _play_frame(frame_index):
 	handleScreen1Packet(pixel_array)
 
 
-	
+
 func ctrlz():
 	_playing = false
 	yield(get_tree().create_timer(0.2), "timeout")
@@ -1183,7 +1198,7 @@ var _canvas_id = []
 var new_canvas = true
 var _mouse_can_replace = false
 var _canvas_packet
-var _current_frame_index_ = 0  
+var _current_frame_index_ = 0
 var send_load = []
 var send_load_2 = []
 var send_load_3 = []
@@ -1206,8 +1221,8 @@ var shoulddel = false
 var old_pid = 0
 var another = false
 enum BrushMode{
-	PENCIL, 
-	ERASER, 
+	PENCIL,
+	ERASER,
 }
 var brush_mode = BrushMode.PENCIL
 var brush_size = 1
@@ -1275,12 +1290,12 @@ func _spawn_canvas(pos, file_path, _offset = 10):
 			grid = 0
 	else:
 		grid = 0
-	
+
 	if grid == 0 && key_handler.stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
 			PlayerData._send_notification("feature incompatable with \"thetamborine\" mod", 1)
 			PlayerData._send_notification("please uninstall it if you wish to place off-canvas", 1)
 			return false
-		
+
 	var offsets = []
 	if two and grid == 0:
 		shoulddel = true
@@ -1292,46 +1307,46 @@ func _spawn_canvas(pos, file_path, _offset = 10):
 			match dir:
 				"down":
 					offsets = [
-						Vector3(0 , 0, _offset), 
+						Vector3(0 , 0, _offset),
 						Vector3(0 , 0, - _offset),
 					]
 				"up":
 					offsets = [
-						Vector3(0 , 0, - _offset), 
-						Vector3(0 , 0, _offset), 
+						Vector3(0 , 0, - _offset),
+						Vector3(0 , 0, _offset),
 					]
 				"right":
 					offsets = [
-						Vector3(- _offset, 0, 0), 
-						Vector3(_offset, 0, 0), 
+						Vector3(- _offset, 0, 0),
+						Vector3(_offset, 0, 0),
 					]
 				"left":
 					offsets = [
-						Vector3(_offset, 0, 0), 
-						Vector3( - _offset, 0, 0), 
+						Vector3(_offset, 0, 0),
+						Vector3( - _offset, 0, 0),
 					]
-		else: 
+		else:
 			match dir:
 				"down":
 					offsets = [
-						Vector3(_offset, 0, 0), 
-						Vector3( - _offset, 0, 0), 
+						Vector3(_offset, 0, 0),
+						Vector3( - _offset, 0, 0),
 					]
 				"up":
 					offsets = [
-						Vector3( - _offset, 0, 0), 
-						Vector3(_offset, 0, 0), 
+						Vector3( - _offset, 0, 0),
+						Vector3(_offset, 0, 0),
 					]
 				"right":
 					offsets = [
-						Vector3(0 , 0, - _offset), 
-						Vector3(0 , 0, _offset), 
+						Vector3(0 , 0, - _offset),
+						Vector3(0 , 0, _offset),
 					]
 				"left":
 					offsets = [
-						Vector3(0 , 0, _offset), 
-						Vector3(0 , 0, - _offset), 
-					]		
+						Vector3(0 , 0, _offset),
+						Vector3(0 , 0, - _offset),
+					]
 		for offset in offsets:
 			var canvas_pos = pos + offset
 			canvas_pos.y -= 0.008699999999999999
@@ -1402,14 +1417,14 @@ func check_image_resolution(file_path, pos):
 	dir = _get_player_facing_direction()
 	var file = File.new()
 	isgif = false
-	
+
 	if not file.file_exists(file_path):
 		push_error("File does not exist: %s" % file_path)
-		return 
+		return
 
 	if file.open(file_path, File.READ) != OK:
 		push_error("Failed to open file: %s" % file_path)
-		return 
+		return
 
 	if not file.eof_reached():
 		var size_line = file.get_line().strip_edges()
@@ -1418,7 +1433,7 @@ func check_image_resolution(file_path, pos):
 		imgy = size_parts[1].to_float()
 		if size_parts[2] == "gif":
 			isgif = true
-			
+
 			print("its a gif")
 			_framecount = size_parts[3].to_int()
 			print(_framecount)
@@ -1462,7 +1477,7 @@ func check_image_resolution(file_path, pos):
 		else:
 			if Input.is_key_pressed(KEY_UP):
 				pos += Vector3(0, 4, 0)
-				
+
 		if (is_in_any_grid(pos) and current_zone == "main_zone") or _canvas_id.empty():
 			gifdir = dir
 			if imgx <= 20 and imgy <= 20:
@@ -1487,11 +1502,11 @@ func display_image(file_path, pos):
 	var file = File.new()
 	if not file.file_exists(file_path):
 		push_error("File does not exist: %s" % file_path)
-		return 
+		return
 	if file.open(file_path, File.READ) != OK:
 		push_error("Failed to open file: %s" % file_path)
-		return 
-		
+		return
+
 	var orientation = dir
 	var base_offset = Vector3()
 	if not isgif:
@@ -1501,7 +1516,7 @@ func display_image(file_path, pos):
 			"right": base_offset = Vector3(0.5 * imgy, 0, 0.5 * imgx)
 			"up": base_offset = Vector3(0.5 * imgx, 0, - 0.5 * imgy)
 			_:
-				return 
+				return
 	else:
 		match orientation:
 			"down": base_offset = Vector3( - 0.5 * imgx, 0, - 0.5 * imgy)
@@ -1509,8 +1524,8 @@ func display_image(file_path, pos):
 			"right": base_offset = Vector3( - 0.5 * imgy, 0, 0.5 * imgx)
 			"up": base_offset = Vector3(0.5 * imgx, 0, 0.5 * imgy)
 			_:
-				return 
-	
+				return
+
 	file.get_line()
 	var temparray = []
 	while not file.eof_reached():
@@ -1548,7 +1563,7 @@ func display_image(file_path, pos):
 			ctrlz_array.remove(0)
 		print("added from ", grid)
 		ctrlz_array.append([temparray, game_grid, game_tile, game_canvas_id])
-	
+
 	base = base_offset + Vector3(0.01234, 0, 0.01234)
 	_chalk_send()
 	if isgif:
@@ -1558,32 +1573,32 @@ func display_image(file_path, pos):
 			"left": base_offset = Vector3(0.5 * imgy, 0, - 0.5 * imgx)
 			"down": base_offset = Vector3( - 0.5 * imgx, 0, - 0.5 * imgy)
 			_:
-				return 
+				return
 		if isready():
 			newgif()
-	
+
 func toggle_playback(message = true):
 	if Input.is_key_pressed(KEY_SHIFT):
 		toggle_playback_mode(true)
 		return
-	
+
 	if Input.is_key_pressed(KEY_CONTROL):
 		reset_gif()
 		return
-	
+
 	if not isgif or frames_path == "" or processing:
 		if message:
 			PlayerData._send_notification("No gif to play!", 1)
 		return
-	
+
 	if not isready():
 		PlayerData._send_notification("Still being processed!", 1)
 		return
-	
+
 	if not another or frame_data_.size() != _framecount:
 		newgif()
 		return
-	
+
 	if playback_mode == PlaybackMode.MANUAL:
 		# Step forward a single frame each time toggle_playback() is called
 		if manual_frame_index >= frame_data_.size():
@@ -1591,7 +1606,7 @@ func toggle_playback(message = true):
 		_play_frame(manual_frame_index)
 		manual_frame_index += 1
 		return
-	
+
 	# Normal/Half/Slow mode toggle
 	_playing = not _playing
 	if not _playing:
@@ -1613,12 +1628,12 @@ func reset_gif():
 
 func toggle_playback_mode(_message = false):
 	var prior = playback_mode
-	
+
 	# Cycle the mode
 	playback_mode = int(playback_mode) + 1
 	if playback_mode > PlaybackMode.MANUAL:
 		playback_mode = PlaybackMode.NORMAL
-	
+
 	# Optional text for the user
 	var mode_names = ["Normal", "Half", "SLOW", "Manual"]
 	if _message:
@@ -1643,7 +1658,7 @@ func _play2():
 		else:
 			# Draw the current frame
 			_play_frame(_current_frame_index_)
-			
+
 			# Figure out how long to wait based on playback mode
 			var delay = frame_delays_[_current_frame_index_] / 1000.0
 			match playback_mode:
@@ -1653,12 +1668,12 @@ func _play2():
 					yield (get_tree().create_timer(delay * 2), "timeout")
 				PlaybackMode.SLOW:
 					yield (get_tree().create_timer(delay * 10), "timeout")
-			
+
 			# Move to next frame
 			_current_frame_index_ += 1
 			if _current_frame_index_ >= frame_data_.size():
 				_current_frame_index_ = 0  # Loop around
-			
+
 			# If stopped mid-loop, exit
 			if not _playing:
 				return
@@ -1669,7 +1684,7 @@ func _play_frame2(frame_index):
 		var local_x = pixel["x"]
 		var local_y = pixel["y"]
 		var pixel_color = pixel["color"]
-		
+
 		var adjusted_position = Vector3()
 		match dir:
 			"up":
@@ -1683,7 +1698,7 @@ func _play_frame2(frame_index):
 			_:
 				push_error("Invalid direction specified: %s" % dir)
 				return
-		
+
 		var final_position = origin + base + adjusted_position
 		_chalk_draw(final_position, pixel_color)
 	_chalk_send()
@@ -1716,7 +1731,7 @@ func _chalk_draw(pos, color):
 						_map_and_draw(1, pos, color, send_load_2)
 				_:
 					pass
-		else: 
+		else:
 			match dir:
 				"up":
 					if pos.x >= origin.x:
@@ -1746,33 +1761,33 @@ func _chalk_draw(pos, color):
 		_map_and_draw(0, pos, color, send_load)
 
 func ctrlzgamecanvas():
-	
+
 	if ctrlz_array.size() == 0:
 		PlayerData._send_notification("Nothing left to undo!", 1)
-		return 
-	
-	
+		return
+
+
 	var last_entry = ctrlz_array[ - 1]
 
-	
+
 	var temparray = last_entry[0]
 	var stored_game_grid = last_entry[1]
 	var stored_game_tile = last_entry[2]
 	var stored_canvas_id = last_entry[3]
-	
+
 	game_grid = stored_game_grid
 	game_tile = stored_game_tile
 	game_canvas_id = stored_canvas_id
 	grid = game_canvas_id + 1
-	
+
 	for position in temparray:
 		_map_and_draw(0, position, - 1, send_load)
-		
+
 	_chalk_send()
-	
+
 	ctrlz_array.pop_back()
 	print("Undo action completed, last entry removed.")
-	
+
 
 func _map_and_draw(grid_idx, pos, color, load_array):
 	if grid == 0:
@@ -1780,13 +1795,13 @@ func _map_and_draw(grid_idx, pos, color, load_array):
 		var p = Vector2(result.x, result.z) + Vector2(100, 100)
 		_tile[grid_idx].set_cell(p.x, p.y, color)
 		load_array.append([p, color])
-		return 
+		return
 	else:
 		var result = game_grid.world_to_map(pos - game_grid.global_transform.origin)
 		var p = Vector2(result.x, result.z) + Vector2(100, 100)
 		game_tile.set_cell(p.x, p.y, color)
 		load_array.append([p, color])
-		return 
+		return
 
 func _chalk_send():
 	if grid == 0:
@@ -1798,7 +1813,7 @@ func _chalk_send():
 				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load_2.duplicate(), "canvas_id": _canvas_id[1]}, "all", 2, Network.CHANNELS.CHALK)
 				send_load_2.clear()
 		else:
-			
+
 			if send_load.size() > 0:
 				Network._send_P2P_Packet({"type": "chalk_packet", "data": send_load.duplicate(), "canvas_id": _canvas_id[0]}, "all", 2, Network.CHANNELS.CHALK)
 				send_load.clear()
@@ -1810,11 +1825,11 @@ func _chalk_send():
 func isready():
 	var file = File.new()
 	var config_path = key_handler.cnfg_path
-	
+
 	if file.open(config_path, File.READ) == OK:
 		var data = file.get_as_text()
 		file.close()
-		
+
 		var json_result = JSON.parse(data)
 		if json_result.error == OK and typeof(json_result.result) == TYPE_DICTIONARY:
 			var config_data = json_result.result
