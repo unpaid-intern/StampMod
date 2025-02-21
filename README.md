@@ -14,8 +14,8 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 - **`PLUS` Key (+)**  
 	- Spawns a stamp at the cursor position.  
-	- Spawns a stamp at the player position if `SHIFT` is held.  
-	- Spawns a stamp at the dock if `CTRL` is held.  
+	- Replaces the old stamp in the same position if `SHIFT` is held.  
+	- Spawns a stamp in the nearest best viewing spot `CTRL` is held.  
 	- Spawns a stamp on **Canvas 1**, **Canvas 2**, **Canvas 3**, or **Canvas 4** if combined with `1`, `2`, `3`, or `4`, respectively.
 
 - **`MINUS` Key (-)**  
@@ -25,9 +25,27 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 
 - **`CTRL + Z` Keys**  
 	- Works as **Ctrl+Z**, undoing the last placed stamps in order.
+  - Off map canvases will be the first things deleted
   - If this keybind is changed, CTRL will not need to be held.
   - If this isn't working, try the `BACKSPACE` key.
+## For Positioning
 
+### When **CONTROL** is Held Down:
+
+- **Movement (Using `I`, `K`, `J`, `L` Keys):**
+  - **`I`**: Move the stamp forward (relative to the camera).
+  - **`K`**: Move the stamp backward.
+  - **`J`**: Shift the stamp to the left.
+  - **`L`**: Shift the stamp to the right.
+
+- **Vertical Adjustment (Using `U` and `O` Keys):**
+  - **`U`**: Lower the stamp.
+  - **`O`**: Raise the stamp.
+
+### Rotation (Using **Arrow Keys**):
+
+- **Left/Right Arrows:** Rotate the stamp around the vertical (yaw) axis.
+- **Up/Down Arrows:** Tilt the stamp (adjust its pitch).
 
 
 # General Information
@@ -38,9 +56,8 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 - In-game canvases have a **200x200** resolution. I recommend **keeping stamps below this size**
 - **Off-canvas**: a maximum of two chalk canvases (200*200) can be placed
 - Saved stamps are located at `/home/user/.local/share/webfishing_stamps_mod` on Linux or `%localappdata%/webfishing_stamps_mod` on Windows
-- **DONT** move when placing gifs down
-- Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people play on potatoes
-- I recommend installing the **Calico mod**!
+- Be mindful of **performance and lag**, especially if playing GIFs. This is a **server side mod**, and people sometimes dont have calico
+- Gifs are no longer supported on in game canvases
 - Please dont use Thunderstore Mod Manager, I suggest Gale or r2modman
 
 # Image Processing Guide
@@ -57,7 +74,6 @@ Here’s a quick overview of how to process your images:
   If your image has colors that don’t neatly match the available chalk palette, dithering can help fill those gaps. It creates patterns or “noise” to transition between colors smoothly. There are many dithering methods (Atkinson, Floyd, Jarvis, etc.)—each one handles color transitions differently. Generally:
   - **Hybrid Dither** automatically switches between methods for mixed textures.
   - **Pattern Dither** creates a retro, pixel-art style.
-  - **Random Dither** adds noise for a more natural, hand-drawn look.  
 
 Ultimately, you should **experiment** with different methods to find the style that best fits your image!
 
@@ -68,7 +84,8 @@ Choose what chalk colors to use by **enabling** or **disabling** them.
 
 - Use **RGB** to map an image’s colors to RGB chalk.  
 - Use **Blank** to make certain colors fully transparent.
-- Use **Placing on Canvas** or **Placing on Grass** to add that color to available colors for increased color accuracy.
+- Use **Canvas Colors** or **Grass Colors** to add the color specified to available colors for increased color accuracy. 
+  - This only works if you are placing on the surface specified.
 
 ### **What is LAB and When to Use It?**
 
@@ -121,8 +138,13 @@ Follow these steps to get it running:
 2. Download [for Windows](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps.zip) or [for Linux](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-Stamps_Linux.zip)
 3. Extract to `PurplePuppy-Stamps` (`PurplePuppy-Stamps_Linux` for linux) and be careful to **not rename it**.
 4. Download [BlueberryWolfi.API](https://github.com/BlueberryWolf/APIs/releases/latest/download/BlueberryWolfi.APIs.zip) for keybinds and extract to `BlueberryWolfi.APIs`
-5. Place folders in `WEBFISHING/GDWeave/Mods/`
+5. Download [PurplePuppy-EaselApi](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-EaselAPI.zip) and extract to `PurplePuppy-EaselApi`
+6. Place folders in `WEBFISHING/GDWeave/Mods/`
 
 ## Requires:
 - [GDWeave](https://github.com/NotNite/GDWeave/tree/main)
 - [BlueberryWolfi.APIs](https://github.com/BlueberryWolf/APIs)
+
+## Special Thanks To:
+- [baltdev](https://github.com/balt-dev) for crazy performance optimizations among other things!
+- [eli](https://github.com/balt-dev) for help with orienting canvases in 3d space

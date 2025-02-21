@@ -1,103 +1,137 @@
-# 0.1.0
-epic troll!! (didn't work)
-# 0.1.1
-Still didn't work!
-# 0.1.2
-AAAAAAUGH im STUPID
-# 1.0.0
-finally got it to link to correct executable directory after stealing script from KMod shoutout KMod
-# 1.0.1
-general bugfixes
-# 1.0.2
-got ctrl z to function and changed keybinds
-# 2.0.0
-> we r getting out of beta with this one!
-- added art saving feature
-- added keybinds courtesy of blueberry wolf
-- made gifs more consistent
-- discovered that antivirus SUCKS fuck you mcaffee
-- improved preprocessing
-- added manual brightness adjustment
-- made stamp menu smaller for the people on crts
-- changed location of saved stamps to %appdata%/local/webfishing_stamp_mod or whatever the fuck Linux ppl use (so now everything wont get deleted every update)
-- faster launching executable
-- added executable manager
-# 2.0.1
-- using... gentler compression??? because thunderstore SUCKS. and made launching it less hard to mess up
-# 2.0.2 
-- better dock handling system
-- changed default keybind and readme
-- more menu art
-- fixed antivirus and better laucnh handling
-- better gif handling
-- faster launch times
-- completely revised launching system
-# 2.0.3
-- adding update to hopefully fix extraction issues with r2modman so download size down from 600 mb to like  200 hopefully
-- removed my awesome machine learning model (rip)
-- also like 1.11 hype (it works)
-# 2.0.4 
-- bugfix for off canvas images over 200*200
-# 2.0.5 
-- compatability with the stupid fucking knockoff of r2modman (the thunderstore overwolf mod manager that cant fucking extract webp images or handle nested folders fuck you) please if you arent a robot use r2modman instead wtffffffff like it works now but still
-# 2.0.6 
-- there was a typo 
-# 2.1.0
-- improved preprocessing logic
-- chalks support
-- adds grass and canvas to color options
-- gif playback speed options
-- took boost and threshold options away from the user because the user cannot be trusted to make competent decisions, done automatically now.
-- fixed for thunderstore mod manager (again!) fuck em
-# 2.2.0
-- placement and menu bugfixes
-- much faster multiframe processing
-- might be the last update / mod for a while, personal stuffs
-# 2.2.1 
-- fix for k means mapping
-# 2.2.2
-- added disclaimer for thetamborine incompatability
-# 2.2.3
-- took away ability to have images larger than 200*200 as only 2 chalk canvases are allowed server side now?? change i didnt know ab.
-# 2.2.4 
-- fixed a mistake i made...
-# 2.2.5
-- now can utilize 2 canvases per image
-- improved preprocessing
-- changing keybind to z for undo will make it ctrl z
-- default keybind will now be z
-# 2.2.6
-- fixed error with vertical right facing images utilizing 2 canvases ugh
-# 2.2.7
-- optimizations with numba courtesy baltdev
-- yet again better preprocessing
-- brightness adjustments now work as intended
-- more bugs
-- fixed dock canvas placement bug
-# 2.2.8
-- video support (mp4 only currently)
-- uses nearest neighbor for upscaling
-# 2.3.0
-- added webm support.
-- fixed video preview bugs
-- awesome text write feature by baltdev
-# 2.3.1
-- improved color accuracy for in game colors
-- better pattern dither
-# 2.3.2 
-- added mean shift mapping as requested from nova 
-# 2.4.0
-- switched to using my new canvasapi
-- added canvas rotation and orientation in 3d space (hopefully)
-- added new feature to place at the nearest "best viewing area" when holding control (replaces placing at dock)
-- better preprocessing / processing. 
-- added new processing method posterize as an alternative to k means mapping.
-# future updates will be slow and may not happen at all, but could include:
-- longer multiframe support
-- canvasAPI for modders if eli doesnt just make one himself lol (sorry)
-- separate mod for art acessibility (allows artists to use mypaint to edit in-game canvases or new ones)
-- canvas locking for hosts
-- better organised save menu
-- improved ctrl z logic
-- more stamps off-canvas (especially for hosts)
-> in that order, at which point i think im happy to move on to other projects outside of webfishing. i wanted to make something cool and i did!
+# Changelog
+
+## 2.4.0
+- Switched to using my new `canvasapi`
+- Added canvas rotation and orientation in 3D space (hopefully)
+- Added new feature to place at the nearest "best viewing area" when holding `Control` (replaces placing at dock)
+- Better preprocessing/processing
+- Fixed a save menu memory leak
+- Long videos won't load all at once and make your game crash
+- Longer multiframe support
+
+## 2.3.2
+- Added mean shift mapping as requested from Nova
+
+## 2.3.1
+- Improved color accuracy for in-game colors
+- Better pattern dither
+
+## 2.3.0
+- Added WebM support
+- Fixed video preview bugs
+- Awesome text write feature by `baltdev`
+
+## 2.2.8
+- Video support (`MP4` only currently)
+- Uses nearest neighbor for upscaling
+
+## 2.2.7
+- Optimizations with `numba` courtesy `baltdev`
+- Yet again better preprocessing
+- Brightness adjustments now work as intended
+- More bugs
+- Fixed dock canvas placement bug
+
+## 2.2.6
+- Fixed error with vertical right-facing images utilizing 2 canvases *ugh*
+
+## 2.2.5
+- Now can utilize 2 canvases per image
+- Improved preprocessing
+- Changing keybind to `Z` for undo will make it `Ctrl+Z`
+- Default keybind will now be `Z`
+
+## 2.2.4
+- Fixed a mistake I made...
+
+## 2.2.3
+- Took away ability to have images larger than `200x200` as only 2 chalk canvases are allowed server-side now?? *Change I didn’t know about.*
+
+## 2.2.2
+- Added disclaimer for `thetamborine` incompatibility
+
+## 2.2.1
+- Fix for `k-means` mapping
+
+## 2.2.0
+- Placement and menu bug fixes
+- Much faster multiframe processing
+- *Might be the last update/mod for a while, personal stuff*
+
+## 2.1.0
+- Improved preprocessing logic
+- Chalks support
+- Added grass and canvas to color options
+- GIF playback speed options
+- Took boost and threshold options away from the user *because the user cannot be trusted to make competent decisions*, done automatically now.
+- Fixed for Thunderstore Mod Manager *(again!)* **F*** them**
+
+## 2.0.6
+- There was a typo
+
+## 2.0.5
+- Compatibility with the **stupid fucking knockoff of r2modman** (*Thunderstore Overwolf Mod Manager that can’t extract WebP images or handle nested folders* **fuck you**)  
+- *Please, if you aren’t a robot, use `r2modman` instead. Wtffffffff. Like, it works now, but still...*
+
+## 2.0.4
+- Bugfix for off-canvas images over `200x200`
+
+## 2.0.3
+- Adding update to hopefully fix extraction issues with `r2modman`, so **download size down from `600MB` to like `200MB` hopefully**
+- Removed my awesome machine learning model *(rip)*
+- **Also, like, `1.11` hype (it works!)**
+
+## 2.0.2
+- Better dock handling system
+- Changed default keybind and README
+- More menu art
+- Fixed antivirus and better launch handling
+- Better GIF handling
+- Faster launch times
+- Completely revised launching system
+
+## 2.0.1
+- Using... *gentler* compression??? **Because Thunderstore SUCKS**  
+- Made launching it less hard to mess up
+
+## 2.0.0
+> **We are getting out of beta with this one!**
+- Added **art saving** feature
+- Added **keybinds** courtesy of `blueberry wolf`
+- Made GIFs **more consistent**
+- Discovered that **antivirus SUCKS** *(fuck you McAfee)*
+- Improved **preprocessing**
+- Added **manual brightness adjustment**
+- Made **stamp menu smaller** for the people on CRTs
+- Changed location of **saved stamps** to `%appdata%/local/webfishing_stamp_mod` *(or whatever the fuck Linux ppl use, so now everything won’t get deleted every update)*
+- **Faster launching executable**
+- Added **executable manager**
+
+## 1.0.2
+- Got `Ctrl+Z` to function and changed keybinds
+
+## 1.0.1
+- General bug fixes
+
+## 1.0.0
+- Finally got it to link to **correct executable directory**  
+*(after stealing script from `KMod`, shoutout `KMod`)*
+
+## 0.1.2
+- **AAAAAAUGH I’m STUPID**
+
+## 0.1.1
+- **Still didn’t work!**
+
+## 0.1.0
+- **Epic troll!!** *(didn't work)*
+
+---
+
+## Future Updates *(Maybe)*
+> *Updates will be slow and may not happen at all, but could include:*
+- Separate mod for **art accessibility** *(allows artists to use `MyPaint` to edit in-game canvases or new ones)*
+- **Canvas locking** for hosts
+- **Better organized** save menu
+
+> *In that order, at which point I think I’m happy to move on to other projects outside of WebFishing. I wanted to make something cool and I did!*

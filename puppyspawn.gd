@@ -4,7 +4,7 @@ onready var _PlayerData = get_node_or_null("/root/PlayerData")
 onready var _OptionsMenu = get_node_or_null("/root/OptionsMenu")
 onready var _Network = get_node_or_null("/root/Network")
 onready var key_handler = get_tree().get_nodes_in_group("keys")[0]
-onready var canvas_handler = get_tree().get_nodes_in_group("canvasSpawner")[0]
+onready var canvas_handler = get_tree().get_nodes_in_group("canvasspawner")[0]
 var _keybinds_api = null
 var cam = null
 var ctrlz_array = []
@@ -107,7 +107,9 @@ func _chalk_update(pos):
 
 
 func _delete(gif = false):
+	canvas_handler.ctrlz()
 	return
+
 	if not update_dynamic_nodes():
 		return 
 	if _hud.using_chat and _hud:
@@ -207,7 +209,9 @@ func spawn_stamp():
 		return 
 	if _hud and _hud.using_chat:
 		return 
-	check_image_resolution(img_path, last_mouse_pos)
+	var stampPath = key_handler.img_path
+	var framesPath = key_handler.frames_path
+	canvas_handler.spawncanvas(stampPath, framesPath)
 
 func update_dynamic_nodes():
 	if not cam:
@@ -228,9 +232,6 @@ func update_dynamic_nodes():
 		_actor_man = get_node_or_null("/root/world")
 		if not _actor_man:
 			return false
-	if not ray_detector.get_parent():
-		get_tree().current_scene.add_child(ray_detector)
-		ray_detector.translation = Vector3.ZERO
 	if PlayerData.player_saved_zone:
 		current_zone = PlayerData.player_saved_zone
 	return true
@@ -247,7 +248,7 @@ func is_in_any_grid(pos: Vector3)->bool:
 			return true
 	return false
 
-func _spawn_canvas(pos, file_path, _offset):
+func _spawn_canvas(pos, file_path, _offset = null):
 	if current_zone == "main_zone":
 		if (pos.x > 48.571999 - 10 and pos.x < 48.571999 + 10) and (pos.z > - 51.041 - 10 and pos.z < - 51.041 + 10):
 			grid = 1
@@ -645,45 +646,18 @@ func display_image(file_path, pos):
 	
 func toggle_playback(message = true):
 	if Input.is_key_pressed(KEY_SHIFT):
-		toggle_playback_mode(true)
+		canvas_handler.togglemode()
 		return
 	
 	if Input.is_key_pressed(KEY_CONTROL):
-		reset_gif()
+		canvas_handler.resetgif()
 		return
-	
-	if not isgif or frames_path == "" or processing:
-		if message:
-			PlayerData._send_notification("No gif to play!", 1)
-		return
-	
+		
 	if not isready():
 		PlayerData._send_notification("Still being processed!", 1)
 		return
-	
-	if not another or frame_data.size() != _framecount:
-		newgif()
-		return
-	
-	if playback_mode == PlaybackMode.MANUAL:
-		# Step forward a single frame each time toggle_playback() is called
-		if manual_frame_index >= frame_data.size():
-			manual_frame_index = 0
-		_play_frame(manual_frame_index)
-		manual_frame_index += 1
-		return
-	
-	# Normal/Half/Slow mode toggle
-	_playing = not _playing
-	if not _playing:
-		if message:
-			PlayerData._send_notification("Playback Stopped", 1)
-		return
-	else:
-		if message:
-			PlayerData._send_notification("Playing!", 0)
-		_play()
-
+		
+	canvas_handler.playgif()
 
 func reset_gif():
 	PlayerData._send_notification("Set to frame 1", 0)
@@ -884,7 +858,7 @@ func _chalk_draw(pos, color):
 		_map_and_draw(0, pos, color, send_load)
 
 func ctrlz():
-	
+
 	if ctrlz_array.size() == 0:
 		PlayerData._send_notification("Nothing left to undo!", 1)
 		return 

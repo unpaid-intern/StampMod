@@ -224,13 +224,25 @@ def create_image(text: str, line_width: int, text_color: tuple[int, int, int], b
     text_rgba = to_rgba(text_color)
     bg_rgba = to_rgba(background_color)
 
+    # Create the colored image array without margin.
     colored_arr = np.zeros((cropped_height, cropped_width, 4), dtype=np.uint8)
     colored_arr[:] = bg_rgba
     colored_arr[sub_image] = text_rgba
 
+    # If using a non-transparent background, add a 1-pixel margin.
+    if bg_rgba[3] != 0:
+        margin = 1
+        new_height = colored_arr.shape[0] + 2 * margin
+        new_width = colored_arr.shape[1] + 2 * margin
+        new_arr = np.zeros((new_height, new_width, 4), dtype=np.uint8)
+        new_arr[:] = bg_rgba
+        new_arr[margin:margin + colored_arr.shape[0], margin:margin + colored_arr.shape[1]] = colored_arr
+        colored_arr = new_arr
+
     final_img = Image.fromarray(colored_arr, "RGBA")
     final_img.save(out_path)
     return str(out_path)
+
 
 
 def get_clipboard_image_via_pyside6():
@@ -348,9 +360,25 @@ def prepare_image(img):
 
 def calculate_luminance(rgb):
     """
-    Calculate luminance of an RGB color using standard weights.
+    Calculate luminance of an RGB color using the standard Rec. 601 weights.
     """
     return 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]
+
+def average_color_key_luminance():
+    """
+    Returns the mean luminance of the 6 color keys.
+    """
+    color_keys = ['ffeeda','050b15','ac0029','008583','e69d00','7da224']
+    luminances = []
+    for key in color_keys:
+        # Parse R,G,B from hex
+        r = int(key[0:2], 16)
+        g = int(key[2:4], 16)
+        b = int(key[4:6], 16)
+        lum = calculate_luminance((r, g, b))
+        luminances.append(lum)
+    return np.mean(luminances)
+
 
 
 def extract_color_key_brightness_range(color_key_array):
@@ -563,36 +591,43 @@ import numpy as np
 ###############################################################################
 #                   Minimal "Auto Brightness" Functions (RGB, Lab)           #
 ###############################################################################
-
-def auto_brightness_rgb(rgb_image_uint8, opaque_mask):
+def auto_brightness_rgb(rgb_image_uint8, opaque_mask, chalks_colors=False):
     """
-    Minimal 'auto brightness' in RGB:
-      - Measures the average luminance of opaque pixels (using 0.299R + 0.587G + 0.114B).
-      - Shifts all opaque pixels so average is near 128.
-      - Allows stronger brightening (up to +60) than darkening (down to -25).
+    Brighten/darken the image so its average luminance is nearer to either:
+      - The average brightness of the color keys (if chalks_colors=False), or
+      - 128 (if chalks_colors=True).
+    Uses a gentler clamp than before to avoid large shifts.
     """
     float_img = rgb_image_uint8.astype(np.float32)
 
-    # Compute luminance on opaque pixels
+    # Compute the current average luminance of the opaque pixels
     lum = (0.299 * float_img[opaque_mask, 0] +
            0.587 * float_img[opaque_mask, 1] +
            0.114 * float_img[opaque_mask, 2])
     avg_lum = np.mean(lum) if lum.size > 0 else 128.0
 
-    # Shift toward target
-    target_lum = 128.0
+    # Decide the target luminance
+    if not chalks_colors:
+        target_lum = average_color_key_luminance()  # ~116.25
+    else:
+        target_lum = 128.0
+
+    # Calculate difference
     diff = target_lum - avg_lum
 
-    # Asymmetric clamp
-    if diff > 0:
-        # brighten up to +60
-        diff = np.clip(diff, 0, 60)
-    else:
-        # darken down to -25
-        diff = np.clip(diff, -25, 0)
+    # Optionally apply a scale so the shift isn't as strong
+    diff *= 0.5  # e.g. half the difference
 
-    # Apply the shift
+    # Use smaller clamp range
+    if diff > 0:
+        diff = np.clip(diff, 0, 30)  # less aggressive brightening
+    else:
+        diff = np.clip(diff, -15, 0) # less aggressive darkening
+
+    # Apply shift
     float_img[opaque_mask] += diff
+
+    # Clip and convert back to uint8
     out = np.clip(float_img, 0, 255).astype(np.uint8)
     return out
 
@@ -997,7 +1032,7 @@ def preprocess_image(
             'clahe_grid_size': 6,
             'unsharp_strength': 1.1,
             'unsharp_radius': 2,
-            'gamma_correction': 0.9,
+            'gamma_correction': 1.0,
             'contrast_percentiles': (1, 99),
         }
 
@@ -1270,7 +1305,6 @@ def _brightness_kernel(data, brightness):
     return new_data
 
 def adjust_brightness(image, brightness):
-    print(brightness)
     """
     Adjusts the brightness of a PIL image in the RGB(A) space.
     brightness: float in [-0.5, 1.5].
@@ -1854,33 +1888,6 @@ def build_color_key(color_key_array):
 # Actual processing methods below
 # ------------------------------------------------------------------------------
 
-@register_processing_method(
-    'Color Match',
-    default_params={},
-    description="Maps each pixel to the closest color of chalk. Basic, consistent, and reliable. Uncheck \"Use LAB Colors\" if the colors seem off!"
-)
-def color_matching(img, color_key, params):
-    img_array = np.array(img)
-    has_alpha = (img_array.shape[2] == 4) if img_array.ndim == 3 else False
-    alpha_threshold = 191
-
-    if has_alpha:
-        alpha_channel = img_array[:, :, 3]
-        opaque_mask = (alpha_channel > alpha_threshold)
-    else:
-        opaque_mask = np.ones((img_array.shape[0], img_array.shape[1]), dtype=bool)
-
-    mapped = find_closest_colors_image(img_array, color_key)
-
-    if has_alpha:
-        mapped[~opaque_mask] = img_array[~opaque_mask]
-
-    mode = 'RGBA' if has_alpha else 'RGB'
-    result_img = Image.fromarray(mapped, mode=mode)
-    return result_img
-
-
-
 
 @register_processing_method(
     'Pattern Dither',
@@ -2126,184 +2133,6 @@ def rgb_to_lab_numba2(r, g, b):
     L = L * (255.0 / 100.0)
     return L, a_val, b_val
 
-@register_processing_method(
-    'Blue Noise Dither',
-    default_params={'strength': 1.0},
-    description="Uses a precomputed blue-noise mask for less structured dithering. "
-                "Uncheck \"Use LAB Colors\" if the colors seem off."
-)
-def blue_noise_void_cluster_dithering(img, color_key, params):
-    """
-    A simplified blue-noise dithering approach:
-      1) Create a large 'blue-noise' mask by tiling a precomputed pattern.
-      2) For each pixel, compare brightness to noise, apply small +/- brightness shift.
-      3) Map to nearest color in 'color_key'. If use_lab=True, do ciede2000 in Lab.
-
-    'strength' controls how strongly we push brightness up/down.
-    """
-    import numpy as np
-    from numba import njit, prange
-
-    global use_lab
-
-    strength = float(params.get('strength', 0.8))
-    max_adjustment_factor = 0.33 * strength
-
-    # Convert to NumPy
-    has_alpha = (img.mode == 'RGBA')
-    img_array = np.array(img, dtype=np.uint8)
-    h, w = img_array.shape[:2]
-
-    if has_alpha:
-        alpha_channel = img_array[:, :, 3]
-        alpha_mask = (alpha_channel > 0)
-    else:
-        alpha_mask = np.ones((h, w), dtype=np.bool_)
-
-    # Convert color_key to array
-    palette_rgb = np.array(list(color_key.values()), dtype=np.float32)
-
-    # Optionally build Lab version of the palette
-    if use_lab:
-        n_p = palette_rgb.shape[0]
-        palette_lab = np.empty((n_p, 3), dtype=np.float32)
-        for i in range(n_p):
-            rr, gg, bb = palette_rgb[i]
-            L, a_val, b_val = rgb_to_lab_numba(rr, gg, bb)
-            palette_lab[i, 0] = L
-            palette_lab[i, 1] = a_val
-            palette_lab[i, 2] = b_val
-    else:
-        palette_lab = np.empty((0, 3), dtype=np.float32)
-
-    # --- Precomputed (example) 8×8 "blue noise" pattern ---
-    small_noise_8x8 = np.array([
-        [162, 204,  48, 235,  30, 204,  62, 210],
-        [ 55, 123, 217,  79, 243, 111, 172,  16],
-        [140, 255,  95, 187, 123, 246,  35, 100],
-        [231,  79, 154,  16, 202,  66, 242, 129],
-        [ 13, 181,  62, 223,  40, 146, 253,  84],
-        [107, 251, 170,  59, 196, 127, 228,  27],
-        [159, 222,  99, 244,  11, 189,  75, 255],
-        [ 88, 142, 210,  24, 118,  48, 197,  49]
-    ], dtype=np.uint8)
-
-    # Tile to 64×64 for a slightly larger mask
-    blue_noise_64 = np.tile(small_noise_8x8, (8, 8))  # (64,64)
-    blue_noise_64f = blue_noise_64.astype(np.float32) / 255.0  # -> [0..1]
-
-    # Tile big enough to cover entire image
-    tile_y = (h // 64) + 1
-    tile_x = (w // 64) + 1
-    big_mask = np.tile(blue_noise_64f, (tile_y, tile_x))
-    # Crop to match image
-    big_mask = big_mask[:h, :w]
-
-    # Convert to float32 for dithering pass
-    proc_img = img_array.astype(np.float32)
-
-    @njit(parallel=True, fastmath=True, cache=True)
-    def do_blue_noise_dither(
-        out_img, alpha_mask,
-        noise_mask, max_adj,
-        use_lab_flag,
-        palette_rgb_f32, palette_lab_f32
-    ):
-        """
-        out_img: float32 image array (H,W,4 or H,W,3)
-        alpha_mask: boolean (H,W)
-        noise_mask: float32 (H,W) in [0..1]
-        palette_rgb_f32: (N,3)
-        palette_lab_f32: (N,3) if use_lab_flag
-        """
-        H, W = out_img.shape[:2]
-        n_colors = palette_rgb_f32.shape[0]
-
-        for y in prange(H):
-            for x in prange(W):
-                if not alpha_mask[y, x]:
-                    continue
-
-                r = out_img[y, x, 0]
-                g = out_img[y, x, 1]
-                b = out_img[y, x, 2]
-
-                # brightness ~ [0..1]
-                brightness = (r + g + b) / 765.0
-                threshold = noise_mask[y, x]
-                diff = brightness - threshold
-
-                factor = 1.0 + (2.0 * diff * max_adj)
-                low_bound = 1.0 - max_adj
-                high_bound = 1.0 + max_adj
-                if factor < low_bound:
-                    factor = low_bound
-                elif factor > high_bound:
-                    factor = high_bound
-
-                # Adjust
-                r_adj = r * factor
-                g_adj = g * factor
-                b_adj = b * factor
-
-                # clamp
-                if r_adj < 0: r_adj = 0
-                if r_adj > 255: r_adj = 255
-                if g_adj < 0: g_adj = 0
-                if g_adj > 255: g_adj = 255
-                if b_adj < 0: b_adj = 0
-                if b_adj > 255: b_adj = 255
-
-                # Nearest color
-                best_idx = 0
-                best_dist = 1e12
-
-                if use_lab_flag:
-                    # Convert to Lab
-                    Lp, ap, bp_ = rgb_to_lab_numba(r_adj, g_adj, b_adj)
-                    for i in range(n_colors):
-                        Lc = palette_lab_f32[i, 0]
-                        ac = palette_lab_f32[i, 1]
-                        bc = palette_lab_f32[i, 2]
-                        dist = ciede2000(Lp, ap, bp_, Lc, ac, bc)
-                        if dist < best_dist:
-                            best_dist = dist
-                            best_idx = i
-                else:
-                    for i in range(n_colors):
-                        dr = r_adj - palette_rgb_f32[i, 0]
-                        dg = g_adj - palette_rgb_f32[i, 1]
-                        db = b_adj - palette_rgb_f32[i, 2]
-                        dist = dr*dr + dg*dg + db*db
-                        if dist < best_dist:
-                            best_dist = dist
-                            best_idx = i
-
-                out_img[y, x, 0] = palette_rgb_f32[best_idx, 0]
-                out_img[y, x, 1] = palette_rgb_f32[best_idx, 1]
-                out_img[y, x, 2] = palette_rgb_f32[best_idx, 2]
-        # End parallel loop
-
-    # Perform the dithering pass
-    do_blue_noise_dither(
-        proc_img, alpha_mask,
-        big_mask.astype(np.float32), max_adjustment_factor,
-        use_lab, palette_rgb, palette_lab
-    )
-
-    # Convert back to uint8
-    proc_img = np.clip(proc_img, 0, 255).astype(np.uint8)
-
-    if has_alpha:
-        # Reattach alpha
-        proc_img[:, :, 3] = alpha_channel
-        out_img = Image.fromarray(proc_img, mode='RGBA')
-    else:
-        out_img = Image.fromarray(proc_img[:, :, :3], mode='RGB')
-
-    return out_img
-
-
 
 @register_processing_method(
     'Jarvis Dither',
@@ -2319,6 +2148,34 @@ def jarvis_judice_ninke_dithering(img, color_key, params):
     ]
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
 
+
+@register_processing_method(
+    'Stucki Dither',
+    default_params={'strength': 0.7},
+    description="An enhancement of Floyd-Steinberg dithering with a wide diffusion matrix. Uncheck \"Use LAB Colors\" if the colors seem off!"
+)
+def stucki_dithering(img, color_key, params):
+    strength = params.get('strength', 1.0)
+    diffusion_matrix = [
+        (1, 0, 8 / 42), (2, 0, 4 / 42),
+        (-2, 1, 2 / 42), (-1, 1, 4 / 42), (0, 1, 8 / 42), (1, 1, 4 / 42), (2, 1, 2 / 42),
+        (-2, 2, 1 / 42), (-1, 2, 2 / 42), (0, 2, 4 / 42), (1, 2, 2 / 42), (2, 2, 1 / 42),
+    ]
+    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
+
+@register_processing_method(
+    'Burkes Dither',
+    default_params={'strength': 0.7},
+    description="A variant of Floyd–Steinberg dithering with a diffusion matrix that emphasizes smoother transitions. Uncheck \"Use LAB Colors\" if the colors seem off!"
+)
+def burkes_dithering(img, color_key, params):
+    strength = params.get('strength', 1.0)
+    diffusion_matrix = [
+        (1, 0, 8 / 32), (2, 0, 4 / 32),
+        (-2, 1, 2 / 32), (-1, 1, 4 / 32), (0, 1, 8 / 32), (1, 1, 4 / 32), (2, 1, 2 / 32),
+    ]
+    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
+    
 @register_processing_method(
     'Atkinson Dither',
     default_params={'strength': 0.7},
@@ -2332,196 +2189,6 @@ def atkinson_dithering(img, color_key, params):
         (0, 2, 1 / 8),
     ]
     return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
-
-
-@register_processing_method(
-    'Stucki Dither',
-    default_params={'strength': 0.7},
-    description="An enhancement of Floyd-Steinberg with a wider diffusion matrix for less noisy results. Uncheck \"Use LAB Colors\" if the colors seem off!"
-)
-def stucki_dithering(img, color_key, params):
-    strength = params.get('strength', 1.0)
-    diffusion_matrix = [
-        (1, 0, 8 / 42), (2, 0, 4 / 42),
-        (-2, 1, 2 / 42), (-1, 1, 4 / 42), (0, 1, 8 / 42), (1, 1, 4 / 42), (2, 1, 2 / 42),
-        (-2, 2, 1 / 42), (-1, 2, 2 / 42), (0, 2, 4 / 42), (1, 2, 2 / 42), (2, 2, 1 / 42),
-    ]
-    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
-
-
-@register_processing_method(
-    'Floyd Dither',
-    default_params={'strength': 0.7},
-    description="Create smooth gradients using diffusion. Best used for images with size over ~120. Uncheck \"Use LAB Colors\" if the colors seem off!"
-)
-def floyd_steinberg_dithering(img, color_key, params):
-    strength = params.get('strength', 1.0)
-    diffusion_matrix = [
-        (1, 0, 7 / 16),
-        (-1, 1, 3 / 16),
-        (0, 1, 5 / 16),
-        (1, 1, 1 / 16),
-    ]
-    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
-
-
-@register_processing_method(
-    'Sierra Dither',
-    default_params={'strength': 0.7},
-    description="Idk what to say about this one lol. Uncheck \"Use LAB Colors\" if the colors seem off!"
-)
-def sierra2_dithering(img, color_key, params):
-    strength = params.get('strength', 1.0)
-    diffusion_matrix = [
-        (1, 0, 4/16), (2, 0, 3/16),
-        (-2, 1, 1/16), (-1, 1, 2/16), (0, 1, 3/16), (1, 1, 2/16), (2, 1, 1/16),
-    ]
-    return optimized_error_diffusion_dithering(img, color_key, strength, diffusion_matrix)
-
-
-@register_processing_method(
-    'Posterize',
-    default_params={'levels': 8},
-    description=
-        "Use the 'levels' parameter to control how many discrete steps per channel. "
-        "Uncheck \"Use LAB Colors\" if the colors seem off!"
-)
-def posterize(img, color_key, params):
-    """
-    Posterize the image to 'levels' discrete steps per channel, then map to the nearest color
-    in color_key. If use_lab=True, does the posterization in Lab space before mapping.
-    """
-    global use_lab
-
-    import numpy as np
-    from skimage.color import rgb2lab, lab2rgb
-    from numba import njit, prange
-
-    # Number of discrete steps per channel
-    levels = int(params.get('levels', 4))
-    if levels < 2:
-        levels = 2  # At least 2 levels to see the effect
-
-    # Extract alpha channel if present
-    has_alpha = (img.mode == 'RGBA')
-    if has_alpha:
-        alpha_channel = np.array(img.getchannel('A'))
-        # We'll operate on an RGB version for posterization
-        rgb_img = img.convert('RGB')
-    else:
-        alpha_channel = None
-        rgb_img = img
-
-    # Convert image to float32 array
-    img_data = np.array(rgb_img, dtype=np.float32)  # shape (H, W, 3)
-
-    # ---------------------------------------------
-    # 1) If using Lab, convert from RGB -> Lab, then do the stepping in Lab space
-    # ---------------------------------------------
-    if use_lab:
-        img_data_01 = img_data / 255.0  # shape (H, W, 3), in [0..1]
-        lab_data = rgb2lab(img_data_01)  # L in [0..100], a,b in ~[-128..+127]
-        
-        # Extract channels to separate arrays
-        L_chan = lab_data[..., 0]        # [0..100]
-        a_chan = lab_data[..., 1]        # ~[-128..127]
-        b_chan = lab_data[..., 2]        # ~[-128..127]
-
-        # Posterize each of L, a, b separately
-        # We'll shift them all to [0..255], do stepping, then shift back
-        step_size = 256.0 / levels
-
-        # Numba helpers
-        @njit(parallel=True, fastmath=True, cache=True)
-        def shift_and_posterize(Larr, Aarr, Barr, step):
-            # Convert to [0..255], floor to steps, then back
-            height, width = Larr.shape
-            for y in prange(height):
-                for x in range(width):
-                    # L from [0..100] => scale to [0..255]
-                    L_255 = Larr[y, x] * (255.0 / 100.0)
-                    # a,b from [-128..127] => shift to [0..255]
-                    a_255 = Aarr[y, x] + 128.0
-                    b_255 = Barr[y, x] + 128.0
-
-                    # Posterize each
-                    L_255 = np.floor(L_255 / step) * step
-                    a_255 = np.floor(a_255 / step) * step
-                    b_255 = np.floor(b_255 / step) * step
-
-                    # Clip
-                    if L_255 < 0: L_255 = 0
-                    if L_255 > 255: L_255 = 255
-                    if a_255 < 0: a_255 = 0
-                    if a_255 > 255: a_255 = 255
-                    if b_255 < 0: b_255 = 0
-                    if b_255 > 255: b_255 = 255
-
-                    # Shift back
-                    Larr[y, x] = L_255 * (100.0 / 255.0)
-                    Aarr[y, x] = a_255 - 128.0
-                    Barr[y, x] = b_255 - 128.0
-
-        shift_and_posterize(L_chan, a_chan, b_chan, step_size)
-
-        # Write channels back
-        lab_data[..., 0] = L_chan
-        lab_data[..., 1] = a_chan
-        lab_data[..., 2] = b_chan
-
-        # Convert Lab back to [0..1] RGB
-        rgb_poster_01 = lab2rgb(lab_data.clip(0, 1e6))  # safety clip
-        img_data = (rgb_poster_01 * 255.0).clip(0, 255)
-
-    # ---------------------------------------------
-    # 2) If NOT using Lab, posterize in RGB space
-    # ---------------------------------------------
-    else:
-        step_size = 256.0 / levels
-
-        @njit(parallel=True, fastmath=True)
-        def posterize_rgb_inplace(data, step):
-            H, W, C = data.shape
-            for y in prange(H):
-                for x in range(W):
-                    # Each channel
-                    r = data[y, x, 0]
-                    g = data[y, x, 1]
-                    b = data[y, x, 2]
-
-                    r = np.floor(r / step) * step
-                    g = np.floor(g / step) * step
-                    b = np.floor(b / step) * step
-
-                    if r < 0: r = 0
-                    if r > 255: r = 255
-                    if g < 0: g = 0
-                    if g > 255: g = 255
-                    if b < 0: b = 0
-                    if b > 255: b = 255
-
-                    data[y, x, 0] = r
-                    data[y, x, 1] = g
-                    data[y, x, 2] = b
-
-        posterize_rgb_inplace(img_data, step_size)
-
-    # ---------------------------------------------
-    # Convert to uint8 and map to color_key
-    # ---------------------------------------------
-    img_data = img_data.astype(np.uint8)
-    mapped_data = find_closest_colors_image(img_data, color_key)
-
-    # Reattach alpha if present
-    if has_alpha:
-        mapped_data[alpha_channel == 0, :3] = [0, 0, 0]  # or keep original
-        mapped_rgba = np.dstack((mapped_data, alpha_channel))
-        out_img = Image.fromarray(mapped_rgba, 'RGBA')
-    else:
-        out_img = Image.fromarray(mapped_data, 'RGB')
-
-    return out_img
-
 
 @register_processing_method(
     'K-Means Mapping',
@@ -2572,6 +2239,34 @@ def simple_k_means_palette_mapping(img, color_key, params):
         result_img = Image.fromarray(mapped_data, 'RGB')
 
     return result_img
+
+
+@register_processing_method(
+    'Color Match',
+    default_params={},
+    description="Maps each pixel to the closest color of chalk. Basic, consistent, and reliable. Uncheck \"Use LAB Colors\" if the colors seem off!"
+)
+def color_matching(img, color_key, params):
+    img_array = np.array(img)
+    has_alpha = (img_array.shape[2] == 4) if img_array.ndim == 3 else False
+    alpha_threshold = 191
+
+    if has_alpha:
+        alpha_channel = img_array[:, :, 3]
+        opaque_mask = (alpha_channel > alpha_threshold)
+    else:
+        opaque_mask = np.ones((img_array.shape[0], img_array.shape[1]), dtype=bool)
+
+    mapped = find_closest_colors_image(img_array, color_key)
+
+    if has_alpha:
+        mapped[~opaque_mask] = img_array[~opaque_mask]
+
+    mode = 'RGBA' if has_alpha else 'RGB'
+    result_img = Image.fromarray(mapped, mode=mode)
+    return result_img
+
+
 
 def process_image(img, color_key, process_mode, process_params):
     """
@@ -3306,6 +3001,8 @@ def process_and_save_video(
                 stamp_file.write(f"{scaled_width},{scaled_height},gif,{total_kept_frames},{uniform_delay}\n")
                 if message_callback:
                     message_callback(f"Header => {scaled_width},{scaled_height},gif,{total_kept_frames},{uniform_delay}")
+                if message_callback:
+                    message_callback(f"Removing Duplicate Pixel Data")
 
                 # Convert to RGBA and extract pixel data
                 frame_array = np.array(first_frame.convert('RGBA'))
@@ -4779,7 +4476,7 @@ class MainWindow(QMainWindow):
         self.text_edit_widget.setLineWrapMode(QPlainTextEdit.NoWrap)
         self.text_edit_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_edit_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.text_edit_widget.setPlaceholderText("Write some text here...")
+        self.text_edit_widget.setPlaceholderText("Write some text here... \n\nFont and code by baltdev!")
         controls_layout.addWidget(self.text_edit_widget)
 
         self.text_submit_button = QPushButton("Load!")
@@ -6412,7 +6109,7 @@ class MainWindow(QMainWindow):
             ring_layout.addWidget(self.lab_color_checkbox)
 
             # Placing on Canvas
-            self.oncanvascheckbox = QCheckBox("Placing on Canvas")
+            self.oncanvascheckbox = QCheckBox("Canvas Colors")
             self.oncanvascheckbox.setStyleSheet(f"""
                 QCheckBox {{
                     font-size: 16px;
@@ -6435,7 +6132,7 @@ class MainWindow(QMainWindow):
             ring_layout.addWidget(self.oncanvascheckbox)
 
             # Placing on Grass
-            self.ongrasscheckbox = QCheckBox("Placing on Grass")
+            self.ongrasscheckbox = QCheckBox("Grass Colors")
             self.ongrasscheckbox.setStyleSheet(f"""
                 QCheckBox {{
                     font-size: 16px;
@@ -6569,8 +6266,6 @@ class MainWindow(QMainWindow):
             resize_layout.addWidget(self.resize_value_label, alignment=Qt.AlignTop)
 
             self.resize_slider.valueChanged.connect(self.resize_slider_changed)
-            sliders_group_layout.addLayout(resize_layout)
-
             # Brightness
             self.method_options_layout = QFormLayout()
             method_options_widget = QWidget()
@@ -6587,13 +6282,13 @@ class MainWindow(QMainWindow):
             brightness_layout.addWidget(self.brightness_label, alignment=Qt.AlignTop)
 
             self.brightness_slider = QSlider(Qt.Horizontal)
-            self.brightness_slider.setRange(30, 80)
-            self.brightness_slider.setValue(50)
+            self.brightness_slider.setRange(20, 80)
+            self.brightness_slider.setValue(45)
             self.brightness_slider.setTickInterval(1)
             brightness_layout.addWidget(self.brightness_slider, alignment=Qt.AlignTop)
 
 
-
+            method_options_widget_layout.addLayout(resize_layout)
             method_options_widget_layout.addLayout(brightness_layout)
             method_options_widget_layout.addLayout(self.method_options_layout)
 
@@ -7167,7 +6862,17 @@ class MainWindow(QMainWindow):
         for thumbnail_widget in self.thumbnails:
             if hasattr(thumbnail_widget, 'gif_movie'):
                 thumbnail_widget.gif_movie.stop()
+                thumbnail_widget.gif_movie.setFileName("")  # Force release of the file handle
                 thumbnail_widget.gif_movie.deleteLater()
+                # Optionally remove the reference:
+                thumbnail_widget.gif_movie = None
+                # Now safely try to delete the temp file
+                if hasattr(thumbnail_widget, 'temp_path'):
+                    try:
+                        thumbnail_widget.temp_path.unlink()
+                    except Exception as e:
+                        print(f"Failed to remove temporary file {thumbnail_widget.temp_path}: {e}")
+
         # Reset thumbnails list and reload data
         self.thumbnails = []
         self.loaded_thumbnails = 0
@@ -7284,7 +6989,7 @@ class MainWindow(QMainWindow):
         self.resize_value_label.setText(str(value))
         if not self.manual_change:
             if not self.is_gif:
-                if value > 240:
+                if value > 220:
                     if "Jarvis Dither" in [method["name"] for method in self.processing_methods]:
                         self.processing_combobox.blockSignals(True)  # Block signals
                         self.processing_combobox.setCurrentText("Jarvis Dither")
@@ -7914,7 +7619,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
 
-        self.brightness_slider.setValue(50)
+        self.brightness_slider.setValue(45)
         self.manual_change = False
         self.resize_slider_changed(self.resize_slider.value())
 
@@ -7929,7 +7634,7 @@ class MainWindow(QMainWindow):
                     self.threshold_sliders[color_number].setValue(20)
 
                 
-                self.brightness_slider.setValue(50)
+                self.brightness_slider.setValue(45)
 
 
             else:
@@ -8060,8 +7765,8 @@ class MainWindow(QMainWindow):
                 self.image_path = file_path
                 # Optionally, adjust any UI elements or sliders for video here.
                 self.display_video(file_path)
-                self.resize_slider.setMaximum(160)
-                self.resize_slider.setValue(96)
+                self.resize_slider.setMaximum(180)
+                self.resize_slider.setValue(100)
             else:
                 # Otherwise, open with PIL.
                 img = Image.open(file_path)
@@ -8075,11 +7780,11 @@ class MainWindow(QMainWindow):
                     image_width, image_height = img.size
                     max_dimension = max(image_width, image_height)  # Use the larger dimension
 
-                    if max_dimension > 160:
-                        self.resize_slider.setMaximum(160)
-                        self.resize_slider.setValue(96)
+                    if max_dimension > 180:
+                        self.resize_slider.setMaximum(180)
+                        self.resize_slider.setValue(100)
                     else:
-                        self.resize_slider.setMaximum(160)
+                        self.resize_slider.setMaximum(180)
                         self.resize_slider.setValue(max_dimension)
                         self.resize_slider_changed(max_dimension)
 
@@ -8161,7 +7866,7 @@ class MainWindow(QMainWindow):
                 self.threshold_labels[color_number].setVisible(False)
                 self.threshold_sliders[color_number].setVisible(False)
 
-            self.brightness_slider.setValue(50)
+            self.brightness_slider.setValue(45)
             self.manual_change = False
             self.resize_slider_changed(self.resize_slider.value())
 
@@ -8604,7 +8309,7 @@ class MainWindow(QMainWindow):
                 # Create slider
                 slider = QSlider(Qt.Horizontal)
                 slider.setRange(2, 16)  # Range for clusters
-                slider.setValue(8) 
+                slider.setValue(16) 
                 slider.setTickPosition(QSlider.TicksBelow)
                 slider.setTickInterval(1)  # Step size for clusters
                 slider.valueChanged.connect(self.parameter_value_changed)
@@ -8623,7 +8328,7 @@ class MainWindow(QMainWindow):
                 def update_value_label(value):
                     value_label.setText(str(value))
                 slider.valueChanged.connect(update_value_label)
-                update_value_label(8)
+                update_value_label(16)
                 # Add slider layout to the form
                 self.method_options_layout.addRow(label, slider_layout)
 

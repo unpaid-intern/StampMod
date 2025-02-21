@@ -3,7 +3,8 @@
 !.gitattributes
 !imagePawcess.py
 !imagePawcessor/
-!PurplePuppy-CanvasAPI/*
+!PurplePuppy-EaselAPI/
+!PurplePuppy-EaselAPI/*
 !imagePawcessor/imagePawcessSetup.py
 !imagePawcessor/imagePawcess.py
 !imagePawcessor/imagePawcessLinux.spec
