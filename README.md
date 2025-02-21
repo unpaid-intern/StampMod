@@ -6,7 +6,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 </p>
 
 
-# Keybinds
+# Keybinds (REBINDABLE IN SETTINGS :O)
 > **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
 - **`F4` Key**  
@@ -28,24 +28,33 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
   - Off map canvases will be the first things deleted
   - If this keybind is changed, CTRL will not need to be held.
   - If this isn't working, try the `BACKSPACE` key.
-## For Positioning
 
-### When **CONTROL** is Held Down:
+## Stamp Positioning Instructions
 
-- **Movement (Using `I`, `K`, `J`, `L` Keys):**
-  - **`I`**: Move the stamp forward (relative to the camera).
-  - **`K`**: Move the stamp backward.
-  - **`J`**: Shift the stamp to the left.
-  - **`L`**: Shift the stamp to the right.
+### Lock/Unlock Movement
+- **P Key:**  
+  Toggle the stamp's movement lock.  
+  - **Unlocked:** You can move and adjust the stamp.
+  - **Locked:** Movement and vertical adjustments are disabled (you can still rotate with arrow keys).
 
-- **Vertical Adjustment (Using `U` and `O` Keys):**
-  - **`U`**: Lower the stamp.
-  - **`O`**: Raise the stamp.
+### Movement (Stamp Translation)
+- **I:** Move the stamp forward (relative to the camera).
+- **K:** Move the stamp backward.
+- **J:** Shift the stamp to the left.
+- **L:** Shift the stamp to the right.
 
-### Rotation (Using **Arrow Keys**):
+### Vertical Adjustment
+- **U:** Lower the stamp.
+- **O:** Raise the stamp.
 
-- **Left/Right Arrows:** Rotate the stamp around the vertical (yaw) axis.
-- **Up/Down Arrows:** Tilt the stamp (adjust its pitch).
+### Rotation
+- **Left/Right Arrow Keys:** Rotate the stamp around its vertical (yaw) axis.
+- **Up/Down Arrow Keys:** Tilt the stamp (adjust its pitch).
+
+### Speed Adjustment
+- **Shift Key:**  
+  Hold **Shift** to move it faster.
+
 
 
 # General Information
@@ -142,6 +151,7 @@ Follow these steps to get it running:
 6. Place folders in `WEBFISHING/GDWeave/Mods/`
 
 ## Requires:
+- [PurplePuppy-EaselApi](https://github.com/unpaid-intern/StampMod/releases/download/PurplePuppy-Stamps/PurplePuppy-EaselAPI.zip)
 - [GDWeave](https://github.com/NotNite/GDWeave/tree/main)
 - [BlueberryWolfi.APIs](https://github.com/BlueberryWolf/APIs)
 

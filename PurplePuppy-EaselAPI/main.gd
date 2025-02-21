@@ -5,11 +5,11 @@ onready var _Spawn = preload("res://mods/PurplePuppy-EaselAPI/spawner.gd").new()
 var first
 var in_game
 
-signal spawncanvas 
-signal playgif
-signal togglemode
-signal ctrlz
-signal resetgif
+signal stamp_spawncanvas 
+signal stamp_playgif
+signal stamp_togglemode
+signal stamp_ctrlz
+signal stamp_resetgif
 
 func _ready():
 	#add_child(_Spawn)
@@ -54,20 +54,20 @@ func check_updates():
 
 func spawncanvas(stamppath, framespath):
 	if _Spawn:
-		emit_signal("spawncanvas", stamppath, framespath)
+		emit_signal("stamp_spawncanvas", stamppath, framespath)
 
 func ctrlz():
 	if _Spawn:
-		emit_signal("ctrlz")
+		emit_signal("stamp_ctrlz")
 
 func togglemode():
 	if _Spawn:
-		emit_signal("togglemode")
+		emit_signal("stamp_togglemode")
 
 func playgif():
 	if _Spawn:
-		emit_signal("playgif")
+		emit_signal("stamp_playgif")
 
 func resetgif():
 	if _Spawn:
-		emit_signal("resetgif")
+		emit_signal("stamp_resetgif")

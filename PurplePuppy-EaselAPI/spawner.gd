@@ -5,10 +5,10 @@ extends Node
 onready var canvas_handler = get_tree().get_nodes_in_group("canvasspawner")[0]
 
 
-var moveSpeed = 0
-var fastSpeed = 10
+var moveSpeed = 8
+var fastSpeed = 16
 var rotateSpeed = 100
-var fastRotateSpeed = 100
+var fastRotateSpeed = 150
 var offset = Vector3(0, -1, 0)
 
 var inputValues = {
@@ -92,11 +92,11 @@ var oldRotateSpeed = rotateSpeed
 
 func _ready():
 	update_dynamic_nodes()
-	canvas_handler.connect("spawncanvas", self, "spawnCanvas")
-	canvas_handler.connect("togglemode", self, "togglemode")
-	canvas_handler.connect("playgif", self, "playgif")
-	canvas_handler.connect("resetgif", self, "resetgif")
-	canvas_handler.connect("ctrlz", self, "ctrlz")
+	canvas_handler.connect("stamp_spawncanvas", self, "spawnCanvas")
+	canvas_handler.connect("stamp_togglemode", self, "togglemode")
+	canvas_handler.connect("stamp_playgif", self, "playgif")
+	canvas_handler.connect("stamp_resetgif", self, "resetgif")
+	canvas_handler.connect("stamp_ctrlz", self, "ctrlz")
 	_PlayerData.connect("_chalk_update", self, "_chalk_update")
 	ray_detector = ray_detector_scene.instance()
 	get_tree().current_scene.add_child(ray_detector)
@@ -107,10 +107,12 @@ func pausephysics():
 	pausephysics = true
 	var wasplaying = _playing
 	_playing = false
-	yield(get_tree().create_timer(2), "timeout")
+	yield(get_tree().create_timer(1.5), "timeout")
 	if screen1exists:
 		pausephysics = false
-	_playing = wasplaying
+	if wasplaying:
+		_playing = false
+		playgif(false)
 
 func update_dynamic_nodes():
 	if not cam:
@@ -262,10 +264,56 @@ func _physics_process(delta):
 
 
 
+
+var inputEnabled = false
+var lastWarningTime = 0  # in milliseconds
+
 func _input(event):
 	if not event is InputEventKey:
 		return
 
+	# Always allow toggling with P.
+	if event.scancode == KEY_P and event.pressed:
+		inputEnabled = not inputEnabled
+		if inputEnabled:
+			PlayerData._send_notification("Stamp Position Unlocked", 0)
+		else:
+			PlayerData._send_notification("Stamp Position Locked", 1)
+		# Reset non-arrow key values regardless of locking or unlocking.
+		inputValues["I"] = 0
+		inputValues["K"] = 0
+		inputValues["J"] = 0
+		inputValues["L"] = 0
+		inputValues["U"] = 0
+		inputValues["O"] = 0
+
+	# Process arrow keys regardless of inputEnabled.
+	if event.scancode in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
+		if event.pressed:
+			match event.scancode:
+				KEY_UP:    inputValues["up"] = 1
+				KEY_DOWN:  inputValues["down"] = 1
+				KEY_LEFT:  inputValues["left"] = 1
+				KEY_RIGHT: inputValues["right"] = 1
+		else:
+			match event.scancode:
+				KEY_UP:    inputValues["up"] = 0
+				KEY_DOWN:  inputValues["down"] = 0
+				KEY_LEFT:  inputValues["left"] = 0
+				KEY_RIGHT: inputValues["right"] = 0
+		return  # Skip further processing for arrow keys.
+
+	# When movement is locked, print a warning for U, I, O, J, or L if lp exists and is not busy.
+	if not inputEnabled:
+		if event.pressed and event.scancode in [KEY_U, KEY_I, KEY_O, KEY_J, KEY_L]:
+			if lp and not lp.busy:
+				var currentTime = OS.get_ticks_msec()
+				if currentTime - lastWarningTime >= 1000:
+					PlayerData._send_notification("Stamp movement locked, press P to unlock", 1)
+					lastWarningTime = currentTime
+		return
+
+	# Process non-arrow keys only when input is enabled.
 	if event.pressed:
 		if lp and not lp.busy:
 			match event.scancode:
@@ -275,11 +323,7 @@ func _input(event):
 				KEY_L:   inputValues["L"] = 1
 				KEY_U:   inputValues["U"] = 0.5
 				KEY_O:   inputValues["O"] = 0.5
-				KEY_UP:    inputValues["up"] = 1
-				KEY_DOWN:  inputValues["down"] = 1
-				KEY_LEFT:  inputValues["left"] = 1
-				KEY_RIGHT: inputValues["right"] = 1
-				KEY_CONTROL:
+				KEY_SHIFT:
 					moveSpeed   = fastSpeed
 					rotateSpeed = fastRotateSpeed
 	else:
@@ -290,15 +334,12 @@ func _input(event):
 			KEY_L:   inputValues["L"] = 0
 			KEY_U:   inputValues["U"] = 0
 			KEY_O:   inputValues["O"] = 0
-			KEY_UP:    inputValues["up"] = 0
-			KEY_DOWN:  inputValues["down"] = 0
-			KEY_LEFT:  inputValues["left"] = 0
-			KEY_RIGHT: inputValues["right"] = 0
-			KEY_CONTROL:
+			KEY_SHIFT:
 				moveSpeed   = oldMoveSpeed
 				rotateSpeed = oldRotateSpeed
 
-#
+
+
 # CANVAS CREATION & DRAWING
 #
 func parse_stamp_data(path):
@@ -576,8 +617,6 @@ func spawnCanvas(stamppath, framespath = null):
 	var viewspot = false
 	if Input.is_key_pressed(KEY_CONTROL):
 		viewspot = true
-	var _playing = false
-	yield(get_tree().create_timer(0.2), "timeout")
 	var atoldspot = false
 	var oldspot
 	var oldrot
@@ -588,6 +627,8 @@ func spawnCanvas(stamppath, framespath = null):
 		if Input.is_key_pressed(KEY_SHIFT) && screen1exists:
 			oldrot = screen1Actor.rotation
 			atoldspot = true
+	var _playing = false
+	yield(get_tree().create_timer(0.2), "timeout")
 	pausephysics = true
 	#check if placing on canvas
 	base_y = 0
@@ -607,6 +648,7 @@ func spawnCanvas(stamppath, framespath = null):
 		deletequery(atoldspot)
 	screen1exists = true
 	if large:
+		yield(get_tree().create_timer(0.5), "timeout")
 		var loaddata = applyLargeTransform(stampdata, imgx, imgy)
 		var load1 = loaddata["load1"]
 		var load2 = loaddata["load2"]
@@ -630,6 +672,7 @@ func spawnCanvas(stamppath, framespath = null):
 			positionCanvasesAt(oldspot, oldrot)
 		pausephysics = false
 	else:
+		yield(get_tree().create_timer(0.5), "timeout")
 		stampdata = applyTransform(stampdata, imgx, imgy, isgif)
 
 		spawnScreen(pos, current_zone)
@@ -1416,7 +1459,6 @@ func _spawn_canvas(pos, file_path, _offset = 10):
 func check_image_resolution(file_path, pos):
 	dir = _get_player_facing_direction()
 	var file = File.new()
-	isgif = false
 
 	if not file.file_exists(file_path):
 		push_error("File does not exist: %s" % file_path)
@@ -1432,7 +1474,6 @@ func check_image_resolution(file_path, pos):
 		imgx = size_parts[0].to_float()
 		imgy = size_parts[1].to_float()
 		if size_parts[2] == "gif":
-
 			print("its a gif")
 			_framecount = size_parts[3].to_int()
 			print(_framecount)

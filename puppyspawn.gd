@@ -91,6 +91,7 @@ func _ready():
 	key_handler.connect("_delete", self, "_delete")
 	key_handler.connect("get_data", self, "get_data")
 	_PlayerData.connect("_chalk_update", self, "_chalk_update")
+	update_dynamic_nodes()
 	
 
 func re_ready():
@@ -106,75 +107,15 @@ func _chalk_update(pos):
 	last_mouse_pos = pos
 
 
-func _delete(gif = false):
+func _delete():
 	canvas_handler.ctrlz()
 	return
 
-	if not update_dynamic_nodes():
-		return 
-	if _hud.using_chat and _hud:
-		return 
-	_framedelay = null
-	processing = false
-	_framecount = null
-	_playing = false
-	if not gif:
-		isgif = false
-	var delete = []
-	var normal = true
-	if key_handler.stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods:
-		ctrlz()
-		return
-	for i in range(3):
-		for actor in Network.OWNED_ACTORS:
-			if actor.actor_type == "canvas":
-				normal = false
-				if not delete.has(actor):
-					delete.append(actor)
-	if normal:
-		ctrlz()
-	else:
-		for actor in delete:
-			_Player._wipe_actor(actor.actor_id)
-		for i in range(5):
-			for actor in delete:
-				Network._send_actor_action(actor, "_wipe_actor", [actor.actor_id])
-				yield (get_tree().create_timer(1.0 / 80.0), "timeout")
-		delete.clear()
-		_canvas_id.clear()
-		_Chalknode = null
-		_grid.clear()
-		_tile.clear()
-		shoulddel = false
-		
-	if gif:
-		var file = File.new()
-
-		if not file.file_exists(img_path):
-			push_error("File does not exist: %s" % img_path)
-			return 
-
-		if file.open(img_path, File.READ) != OK:
-			push_error("Failed to open file: %s" % img_path)
-			return 
-
-		if not file.eof_reached():
-			var size_line = file.get_line().strip_edges()
-			var size_parts = size_line.split(",")
-			imgx = size_parts[0].to_float()
-			imgy = size_parts[1].to_float()
-			if size_parts[2] == "gif":
-				isgif = true
-				_framecount = size_parts[3].to_int()
-				_framedelay = size_parts[4].to_int()
-				processing = false
-				_playing = false
-				another = false
 		
 		
 func open_menu():
 	update_dynamic_nodes()
-	if _hud and _hud.using_chat:
+	if _Player and _Player.busy:
 		return 
 	
 	if wait:
@@ -207,7 +148,7 @@ func resetwait():
 func spawn_stamp():
 	if not update_dynamic_nodes():
 		return 
-	if _hud and _hud.using_chat:
+	if _Player and _Player.busy:
 		return 
 	var stampPath = key_handler.img_path
 	var framesPath = key_handler.frames_path
@@ -472,7 +413,7 @@ func check_image_resolution(file_path, pos):
 			else:
 				if Input.is_key_pressed(KEY_CONTROL):
 					if shoulddel:
-						_delete(true)
+						_delete()
 						yield (get_tree().create_timer(0.6), "timeout")
 					pos = Vector3(154 + (imgy / 2), - 0.3, 1.4)
 					dir = "left"
@@ -540,7 +481,7 @@ func check_image_resolution(file_path, pos):
 					two = true
 					_spawn_canvas(origin, file_path, _offset)
 		else:
-			_delete(true)
+			_delete()
 			yield (get_tree().create_timer(0.6), "timeout")
 			gifdir = dir
 			if imgx <= 20 and imgy <= 20:
@@ -645,6 +586,8 @@ func display_image(file_path, pos):
 			newgif()
 	
 func toggle_playback(message = true):
+	if _Player and _Player.busy:
+		return
 	if Input.is_key_pressed(KEY_SHIFT):
 		canvas_handler.togglemode()
 		return
@@ -857,34 +800,7 @@ func _chalk_draw(pos, color):
 	else:
 		_map_and_draw(0, pos, color, send_load)
 
-func ctrlz():
 
-	if ctrlz_array.size() == 0:
-		PlayerData._send_notification("Nothing left to undo!", 1)
-		return 
-	
-	
-	var last_entry = ctrlz_array[ - 1]
-
-	
-	var temparray = last_entry[0]
-	var stored_game_grid = last_entry[1]
-	var stored_game_tile = last_entry[2]
-	var stored_canvas_id = last_entry[3]
-	
-	game_grid = stored_game_grid
-	game_tile = stored_game_tile
-	game_canvas_id = stored_canvas_id
-	grid = game_canvas_id + 1
-	
-	for position in temparray:
-		_map_and_draw(0, position, - 1, send_load)
-		
-	_chalk_send()
-	
-	ctrlz_array.pop_back()
-	print("Undo action completed, last entry removed.")
-	
 
 func _map_and_draw(grid_idx, pos, color, load_array):
 	if grid == 0:

@@ -445,7 +445,7 @@ func _ctrlz():
 		if Input.is_key_pressed(KEY_CONTROL):
 			emit_signal("_delete")
 	else:
-		emit_signal("DA")
+		emit_signal("_delete")
 
 
 func send_keybind():
