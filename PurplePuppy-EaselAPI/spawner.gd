@@ -1432,7 +1432,6 @@ func check_image_resolution(file_path, pos):
 		imgx = size_parts[0].to_float()
 		imgy = size_parts[1].to_float()
 		if size_parts[2] == "gif":
-			isgif = true
 
 			print("its a gif")
 			_framecount = size_parts[3].to_int()

@@ -1,5 +1,8 @@
 # Changelog
 
+## 3.0.1
+- maybe the last release of stamps, everything works
+
 ## 2.4.0
 - Switched to using my new `canvasapi`
 - Added canvas rotation and orientation in 3D space (hopefully)
