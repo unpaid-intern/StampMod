@@ -147,4 +147,4 @@ Follow these steps to get it running:
 
 ## Special Thanks To:
 - [baltdev](https://github.com/balt-dev) for crazy performance optimizations among other things!
-- [eli](https://github.com/balt-dev) for help with orienting canvases in 3d space
+- [eli](https://github.com/geringverdien/TeamFishnet) for help with orienting canvases in 3d space
