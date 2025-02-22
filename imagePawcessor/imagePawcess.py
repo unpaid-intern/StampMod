@@ -6256,12 +6256,12 @@ class MainWindow(QMainWindow):
 
             self.resize_slider = QSlider(Qt.Horizontal)
             self.resize_slider.setRange(6, 400)
-            self.resize_slider.setValue(128)
+            self.resize_slider.setValue(200)
             self.resize_slider.setTickInterval(10)
             self.resize_slider.setTickPosition(QSlider.TicksBelow)
             resize_layout.addWidget(self.resize_slider, alignment=Qt.AlignTop)
 
-            self.resize_value_label = QLabel("128")
+            self.resize_value_label = QLabel("200")
             self.resize_value_label.setAlignment(Qt.AlignTop)
             resize_layout.addWidget(self.resize_value_label, alignment=Qt.AlignTop)
 
@@ -7765,7 +7765,7 @@ class MainWindow(QMainWindow):
                 self.image_path = file_path
                 # Optionally, adjust any UI elements or sliders for video here.
                 self.display_video(file_path)
-                self.resize_slider.setMaximum(180)
+                self.resize_slider.setMaximum(200)
                 self.resize_slider.setValue(100)
             else:
                 # Otherwise, open with PIL.
@@ -7780,11 +7780,11 @@ class MainWindow(QMainWindow):
                     image_width, image_height = img.size
                     max_dimension = max(image_width, image_height)  # Use the larger dimension
 
-                    if max_dimension > 180:
-                        self.resize_slider.setMaximum(180)
+                    if max_dimension > 200:
+                        self.resize_slider.setMaximum(200)
                         self.resize_slider.setValue(100)
                     else:
-                        self.resize_slider.setMaximum(180)
+                        self.resize_slider.setMaximum(200)
                         self.resize_slider.setValue(max_dimension)
                         self.resize_slider_changed(max_dimension)
 
@@ -7814,7 +7814,7 @@ class MainWindow(QMainWindow):
                     self.resize_slider.setMaximum(max_dim)  # max_dim is already ≤ 400
                         
                     if largest_dim > max_dim:
-                        self.resize_slider.setValue(128)
+                        self.resize_slider.setValue(200)
                     else:
                         self.resize_slider.setValue(largest_dim)
                         
@@ -8834,7 +8834,7 @@ class MainWindow(QMainWindow):
         self.image_label.setStyleSheet("")
 
         # Reset resize slider to default
-        self.resize_slider.setValue(128)
+        self.resize_slider.setValue(200)
         self.resize_slider.setMaximum(400)
 
         # Reset color options and related UI elements

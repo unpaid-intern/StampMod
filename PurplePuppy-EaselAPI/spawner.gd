@@ -92,6 +92,7 @@ var oldRotateSpeed = rotateSpeed
 
 func _ready():
 	update_dynamic_nodes()
+	connect("gif_data_loaded", self, "_on_gif_data_loaded")
 	canvas_handler.connect("stamp_spawncanvas", self, "spawnCanvas")
 	canvas_handler.connect("stamp_togglemode", self, "togglemode")
 	canvas_handler.connect("stamp_playgif", self, "playgif")
@@ -266,14 +267,14 @@ func _physics_process(delta):
 
 
 var inputEnabled = false
-var lastWarningTime = 0  # in milliseconds
+var lastWarningTime = 0 
 
 func _input(event):
 	if not event is InputEventKey:
 		return
 
 	# Always allow toggling with P.
-	if event.scancode == KEY_P and event.pressed:
+	if event.scancode == KEY_P and event.pressed and not (lp and lp.busy):
 		inputEnabled = not inputEnabled
 		if inputEnabled:
 			PlayerData._send_notification("Stamp Position Unlocked", 0)
@@ -287,23 +288,24 @@ func _input(event):
 		inputValues["U"] = 0
 		inputValues["O"] = 0
 
-	# Process arrow keys regardless of inputEnabled.
-	if event.scancode in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
-		if event.pressed:
-			match event.scancode:
-				KEY_UP:    inputValues["up"] = 1
-				KEY_DOWN:  inputValues["down"] = 1
-				KEY_LEFT:  inputValues["left"] = 1
-				KEY_RIGHT: inputValues["right"] = 1
-		else:
-			match event.scancode:
-				KEY_UP:    inputValues["up"] = 0
-				KEY_DOWN:  inputValues["down"] = 0
-				KEY_LEFT:  inputValues["left"] = 0
-				KEY_RIGHT: inputValues["right"] = 0
-		return  # Skip further processing for arrow keys.
 
-	# When movement is locked, print a warning for U, I, O, J, or L if lp exists and is not busy.
+	if event.scancode in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
+		if lp and not lp.busy:
+			if event.pressed:
+				match event.scancode:
+					KEY_UP:    inputValues["up"] = 1
+					KEY_DOWN:  inputValues["down"] = 1
+					KEY_LEFT:  inputValues["left"] = 1
+					KEY_RIGHT: inputValues["right"] = 1
+			else:
+				match event.scancode:
+					KEY_UP:    inputValues["up"] = 0
+					KEY_DOWN:  inputValues["down"] = 0
+					KEY_LEFT:  inputValues["left"] = 0
+					KEY_RIGHT: inputValues["right"] = 0
+			return
+
+
 	if not inputEnabled:
 		if event.pressed and event.scancode in [KEY_U, KEY_I, KEY_O, KEY_J, KEY_L]:
 			if lp and not lp.busy:
@@ -313,7 +315,7 @@ func _input(event):
 					lastWarningTime = currentTime
 		return
 
-	# Process non-arrow keys only when input is enabled.
+
 	if event.pressed:
 		if lp and not lp.busy:
 			match event.scancode:
@@ -337,6 +339,7 @@ func _input(event):
 			KEY_SHIFT:
 				moveSpeed   = oldMoveSpeed
 				rotateSpeed = oldRotateSpeed
+
 
 
 
@@ -486,8 +489,8 @@ func applyLargeTransform(data, imgx, imgy):
 	var data2 = []
 
 	if vertical:
-		var offset = imgy/2
-		var offset2 = imgy-200
+		var offset = imgy/2 - 1
+		var offset2 = imgy-199
 		var offsetx = (200 - imgx) * 0.5
 		for tile in data:
 			var orig_x = tile[0]
@@ -498,7 +501,7 @@ func applyLargeTransform(data, imgx, imgy):
 			transformed.append([ int(round(a_x)), int(round(imgy - a_y)), color ])
 		for tile in transformed:
 			if tile[1] < (offset):
-				data2.append([ tile[0] + offsetx, tile[1], tile[2] ])
+				data2.append([ tile[0] + offsetx, tile[1] + 1, tile[2] ])
 			else:
 				data1.append([ tile[0] + offsetx, tile[1] - offset2, tile[2] ])
 	else:
@@ -604,15 +607,17 @@ func getLargePos(centerpos: Vector3, centerspacing: float) -> Dictionary:
 
 var screen1exists
 var waslarge
-
+var finished = true
 func spawnCanvas(stamppath, framespath = null):
-	if not update_dynamic_nodes():
+	if not update_dynamic_nodes() or not finished:
 		return
+	finished = false
 	ondefault = findDefaultCanvas(last_mouse_pos)
 	if (ondefault || Input.is_key_pressed(KEY_1) || Input.is_key_pressed(KEY_2) || Input.is_key_pressed(KEY_3) || Input.is_key_pressed(KEY_4)) && !(Input.is_key_pressed(KEY_CONTROL) || Input.is_key_pressed(KEY_SHIFT)):
 		frames_path = framepath
 		update_dynamic_nodes2()
 		check_image_resolution(stamppath, last_mouse_pos)
+		finished = true
 		return
 	var viewspot = false
 	if Input.is_key_pressed(KEY_CONTROL):
@@ -628,7 +633,7 @@ func spawnCanvas(stamppath, framespath = null):
 			oldrot = screen1Actor.rotation
 			atoldspot = true
 	var _playing = false
-	yield(get_tree().create_timer(0.2), "timeout")
+	yield(get_tree().create_timer(0.3), "timeout")
 	pausephysics = true
 	#check if placing on canvas
 	base_y = 0
@@ -643,12 +648,16 @@ func spawnCanvas(stamppath, framespath = null):
 	var dir = _get_player_facing_direction()
 	var stampinfo = parse_stamp_data(stamppath)
 	assign_stamp_data(stampinfo)
+	if isgif and loading_in_progress:
+		finished = true
+		PlayerData._send_notification("Dont load place new gifs while the old one is still loading", 1)
+		return
 	var stampdata = getstampdata(stamppath)
 	if canvastotal > 0:
 		deletequery(atoldspot)
 	screen1exists = true
 	if large:
-		yield(get_tree().create_timer(0.5), "timeout")
+		yield(get_tree().create_timer(0.4), "timeout")
 		var loaddata = applyLargeTransform(stampdata, imgx, imgy)
 		var load1 = loaddata["load1"]
 		var load2 = loaddata["load2"]
@@ -671,8 +680,9 @@ func spawnCanvas(stamppath, framespath = null):
 		elif atoldspot:
 			positionCanvasesAt(oldspot, oldrot)
 		pausephysics = false
+		finished = true
 	else:
-		yield(get_tree().create_timer(0.5), "timeout")
+		yield(get_tree().create_timer(0.4), "timeout")
 		stampdata = applyTransform(stampdata, imgx, imgy, isgif)
 
 		spawnScreen(pos, current_zone)
@@ -687,8 +697,14 @@ func spawnCanvas(stamppath, framespath = null):
 		elif atoldspot:
 			positionCanvasesAt(oldspot, oldrot)
 		pausephysics = false
+		finished = true
 		if isgif:
 			framedatapath = framespath
+			if not loading_in_progress:
+				loading_in_progress = true
+				PlayerData._send_notification("Loading GIF data... (could take a couple mins)", 0)
+				var thread = Thread.new()
+				thread.start(self, "_loadGifDataThread", framedatapath)
 # Store both position and rotation for each spot. translate y -4
 export(Array, Dictionary) var main_zone_spots = [
 	{"viewpos": Vector3(176.26033, -0.758699, 1.404384), "viewrot": Vector3(1.192642, -1.572032, 0)},
@@ -971,7 +987,20 @@ func posUpdate():
 #
 # Gif Related things
 #
+signal gif_data_loaded(data)
+
+var loading_in_progress = false
+var loading_cancelled = false
+var loading_thread : Thread = null
+
 func resetGifState() -> void:
+	# If a loading thread is running, cancel it.
+	if loading_thread:
+		loading_cancelled = true
+		loading_thread.wait_to_finish()
+		loading_thread = null
+		loading_cancelled = false
+
 	# Reset playback indices.
 	_current_frame_index = 0
 	manual_frame_index = 0
@@ -981,17 +1010,14 @@ func resetGifState() -> void:
 	if frame_data:
 		frame_data.clear()
 
-
 	if typeof(frame_delays) == TYPE_ARRAY:
 		frame_delays.clear()
 
-
 	processing = false
 	another = false
-
 	_framedelay = false
 
-	# Send a notification for debugging (optional).
+	# Send a notification for debugging.
 	print("GIF state has been reset.")
 
 func applyTransformToPool(data: Array) -> PoolByteArray:
@@ -1026,26 +1052,23 @@ func getGifData(file_path: String) -> Array:
 		push_error("Could not open file: " + file_path)
 		return final_data
 
-	# Read entire file as text.
-	var file_text = file.get_as_text()
-	file.close()
-	
-	# Split into lines.
-	var lines = file_text.split("\n")
-	
-	var header_set = false
 	var current_frame_number: int = 0
 	var current_delay: int = 0
 	var current_frame_data = []
 	var last_transformed = null  # Store the last frame's transformed data
-	
-	# Loop over every line.
-	for line in lines:
-		line = line.strip_edges()
+
+	# Read and process the file line by line.
+	while not file.eof_reached():
+		# Check for cancellation request.
+		if loading_cancelled:
+			file.close()
+			return []  # Abort loading; return empty data.
+			
+		var line = file.get_line().strip_edges()
 		if line == "":
 			continue
-		
-		# Check if this line is a frame header.
+
+		# Frame header detection.
 		if line.begins_with("frame,"):
 			# If we have accumulated pixel data, process it.
 			if current_frame_data.size() > 0:
@@ -1054,20 +1077,20 @@ func getGifData(file_path: String) -> Array:
 				last_transformed = transformed
 				current_frame_data.clear()
 			else:
-				# No new pixel data since the last header:
-				# If we have a previous frame, duplicate it.
+				# No new pixel data; duplicate last frame if available.
 				if last_transformed != null:
 					final_data.append([ current_frame_number, current_delay, last_transformed ])
-			
-			header_set = true
+
+			# Parse header.
 			var parts = line.split(",")
 			if parts.size() >= 3:
 				current_frame_number = parts[1].to_int()
-				# Use _framedelay if it’s nonzero; otherwise, use the header delay.
-				if _framedelay and int(_framedelay) != 0:
-					current_delay = int(_framedelay)
-				else:
+				# Use header delay if _framedelay is false (or zero),
+				# else override with _framedelay.
+				if _framedelay == false or int(_framedelay) == 0:
 					current_delay = parts[2].to_int()
+				else:
+					current_delay = int(_framedelay)
 				print("Parsed header: frame:", current_frame_number, "delay:", current_delay)
 			else:
 				push_error("Invalid frame header: " + line)
@@ -1088,22 +1111,46 @@ func getGifData(file_path: String) -> Array:
 		final_data.append([ current_frame_number, current_delay, transformed ])
 		last_transformed = transformed
 	
+	file.close()
 	return final_data
 
+# This function is executed on a separate thread.
+func _loadGifDataThread(file_path: String) -> void:
+	var data = getGifData(file_path)
+	# If loading was cancelled during processing, do not emit a signal.
+	if loading_cancelled:
+		return
+	call_deferred("emit_signal", "gif_data_loaded", data)
+
+# This callback runs on the main thread once the GIF data has been loaded.
+func _on_gif_data_loaded(data):
+	# Only update if we weren't cancelled.
+	if loading_cancelled:
+		return
+	frame_data = data
+	loading_in_progress = false
+	loading_thread = null  # Reset our thread reference.
+	PlayerData._send_notification("GIF data loaded.", 0)
+	# Optionally, auto-start playback now:
+	# playgif(false)
 
 func playgif(message = true):
 	if not isgif:
 		if message:
 			PlayerData._send_notification("No gif to play!", 1)
 		return
-
-	# Load frame data if not already loaded.
+	
+	if loading_in_progress:
+		PlayerData._send_notification("Still loading grrrr!! Be patient!", 1)
+	
+	# If GIF data is not loaded, load it on a separate thread.
 	if frame_data.empty():
-		frame_data = getGifData(framedatapath)
-		if frame_data.empty():
-			if message:
-				PlayerData._send_notification("Failed to load GIF data.", 1)
-			return
+		if not loading_in_progress:
+			loading_in_progress = true
+			PlayerData._send_notification("Loading GIF data...", 0)
+			loading_thread = Thread.new()
+			loading_thread.start(self, "_loadGifDataThread", framedatapath)
+		return
 
 	# Manual mode: step a single frame per call.
 	if playback_mode == PlaybackMode.MANUAL:
@@ -1124,13 +1171,11 @@ func playgif(message = true):
 			PlayerData._send_notification("Playing!", 0)
 		_play()
 
-
 func resetgif():
 	PlayerData._send_notification("Set to frame 1", 0)
 	_current_frame_index = 0
 	manual_frame_index = 0
 	_playing = false
-
 
 func togglemode():
 	var prior = playback_mode
@@ -1156,22 +1201,33 @@ func _play():
 		if playback_mode == PlaybackMode.MANUAL:
 			return
 
+		# Record the start time of processing the frame.
+		var start_time = OS.get_ticks_msec()
 		_play_frame(_current_frame_index)
+		# Measure how long processing took.
+		var processing_time = OS.get_ticks_msec() - start_time
 
+		# Determine the intended delay.
 		var delay_ms = 0
-		if _framedelay:
-			delay_ms = _framedelay
-		else:
+		if not _framedelay:
 			delay_ms = frame_data[_current_frame_index][1]
-		var delay_sec = delay_ms / 1000.0
+		else:
+			delay_ms = int(_framedelay)
+		
+		# Calculate remaining delay after accounting for processing time.
+		var remaining_delay = delay_ms - processing_time
+		if remaining_delay < 0:
+			remaining_delay = 0
 
-		match playback_mode:
-			PlaybackMode.NORMAL:
-				yield(get_tree().create_timer(delay_sec), "timeout")
-			PlaybackMode.HALF:
-				yield(get_tree().create_timer(delay_sec * 2), "timeout")
-			PlaybackMode.SLOW:
-				yield(get_tree().create_timer(delay_sec * 10), "timeout")
+		var delay_sec = remaining_delay / 1000.0
+
+		# Use playback mode multipliers.
+		if playback_mode == PlaybackMode.NORMAL:
+			yield(get_tree().create_timer(delay_sec), "timeout")
+		elif playback_mode == PlaybackMode.HALF:
+			yield(get_tree().create_timer(delay_sec * 2), "timeout")
+		elif playback_mode == PlaybackMode.SLOW:
+			yield(get_tree().create_timer(delay_sec * 10), "timeout")
 
 		_current_frame_index += 1
 		if _current_frame_index >= frame_data.size():
@@ -1180,24 +1236,38 @@ func _play():
 		if not _playing:
 			return
 
-
-
 func _play_frame(frame_index):
-	# Retrieve the pixel data PoolByteArray from the frame.
 	var pool_data: PoolByteArray = frame_data[frame_index][2]
 	var pixel_array = []
-	# Each pixel is stored as 3 ints, so convert them.
-	for i in range(0, pool_data.size(), 3):
-		 var x = pool_data[i]
-		 var y = pool_data[i+1]
-		 var color = pool_data[i+2]
-		 pixel_array.append([x, y, color])
-	# Now send the converted array to handleScreen1Packet.
+	var total = pool_data.size()
+	var chunk_size = 3000  # in elements, not pixels!
+
+	# Ensure chunk_size is a multiple of 3 so we don't cut through a pixel
+	chunk_size = int(chunk_size / 3) * 3
+
+	for i in range(0, total, chunk_size):
+		var chunk_end = min(i + chunk_size, total)
+
+		# Also align chunk_end so it doesn't split a 3-value set:
+		chunk_end -= (chunk_end - i) % 3
+
+		for j in range(i, chunk_end, 3):
+			var x = pool_data[j]
+			var y = pool_data[j+1]
+			var color = pool_data[j+2]
+			pixel_array.append([x, y, color])
+
+		yield(get_tree(), "idle_frame")
+	
 	handleScreen1Packet(pixel_array)
 
 
 
+
+# Connect the signal when the node is ready.
 func ctrlz():
+	if lp and lp.busy:
+		return
 	_playing = false
 	yield(get_tree().create_timer(0.2), "timeout")
 	pausephysics = true
