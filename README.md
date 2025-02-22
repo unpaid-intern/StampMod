@@ -6,7 +6,7 @@ A stamp and art saving mod for for WEBFISHING using GDWeave
 </p>
 
 
-# Keybinds (REBINDABLE IN SETTINGS :O)
+# Keybinds
 > **Keybinds are fully customizable using the game's built in controls settings, courtesy BlueberryWolfiAPIs**
 
 - **`F4` Key**  
