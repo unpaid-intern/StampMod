@@ -650,7 +650,7 @@ func spawnCanvas(stamppath, framespath = null):
 	assign_stamp_data(stampinfo)
 	if isgif and loading_in_progress:
 		finished = true
-		PlayerData._send_notification("Dont load place new gifs while the old one is still loading", 1)
+		PlayerData._send_notification("Dont place new gifs while the old one is still loading", 1)
 		return
 	var stampdata = getstampdata(stamppath)
 	if canvastotal > 0:
