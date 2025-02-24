@@ -1,6 +1,7 @@
 import os
 import sys
 import io
+import re
 import random
 import threading
 import tempfile
@@ -3474,7 +3475,7 @@ def main(image_path, remove_bg, preprocess_flag, use_lab_flag, brightness_flag, 
                 return
         else:
             # Check if the file is a video (based on extension)
-            if str(image_path).lower().endswith('.mp4') or str(image_path).lower().endswith('.webm'):
+            if re.search(r"\.(mp4|webm|mkv)$", str(image_path), re.I):
                 if message_callback:
                     message_callback("Processing video...")
                 process_and_save_video(image_path, resize_dim, process_mode, use_lab_flag, process_params, color_key_array, remove_bg, preprocess_flag, progress_callback, message_callback, error_callback)
@@ -7480,7 +7481,7 @@ class MainWindow(QMainWindow):
         self.reset_to_initial_state()     
         file_dialog = QFileDialog(self)
         # Allow both images and MP4 videos to be picked.
-        file_dialog.setNameFilters(["Images and Videos (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.mp4 *webm)"])
+        file_dialog.setNameFilters(["Images and Videos (*.png *.jpg *.jpeg *.bmp *.gif *.webp *.mp4 *.webm *.mkv)"])
         if file_dialog.exec():
             file_path = file_dialog.selectedFiles()[0]
             self.image_path = file_path
@@ -7759,7 +7760,7 @@ class MainWindow(QMainWindow):
             # If the file is a video (e.g. MP4), process it with display_video.
             isvideo = False
             # Convert file_path to string for safe lower() comparison.
-            if str(file_path).lower().endswith('.mp4') or str(file_path).lower().endswith('.webm'):
+            if re.search(r"\.(mp4|webm|mkv)$", str(file_path), re.I):
                 self.is_gif = True
                 isvideo = True
                 self.image_path = file_path
