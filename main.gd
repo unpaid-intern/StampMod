@@ -7,6 +7,7 @@ onready var _Spawn = preload("res://mods/PurplePuppy-Stamps/puppyspawn.gd").new(
 var stupidincompatabilitydontpatchshitthatbreaksotherpeoplesmods = null
 var debug = true
 
+onready var PlayerAPI = get_node("/root/BlueberryWolfiAPIs/PlayerAPI")
 var KeybindsAPI = null
 var img_path = null
 var frames_path = null
@@ -430,17 +431,21 @@ func _on_keybind_changed(action_name: String, title: String, input_event: InputE
 	else:
 		print(prefix, "Input event is not a key event.")
 
-		
+
 func _menu():
+	if PlayerAPI.local_player.busy: return
 	emit_signal("open_menu")
-	
+
 func _stamp():
+	if PlayerAPI.local_player.busy: return
 	emit_signal("spawn_stamp")
-	
+
 func _gif():
+	if PlayerAPI.local_player.busy: return
 	emit_signal("_play")
 
 func _ctrlz():
+	if PlayerAPI.local_player.busy: return
 	if config_data["ctrl_z"] == 90:
 		if Input.is_key_pressed(KEY_CONTROL):
 			emit_signal("_delete")
